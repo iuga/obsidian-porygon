@@ -164,6 +164,7 @@ export class PorygonView extends ItemView {
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("porygon-view");
+		this.registerInternalLinkHandlers(this.contentEl);
 		this.screen = this.getInitialScreen();
 		await this.loadModelsForModelStep();
 		this.render();
@@ -172,6 +173,54 @@ export class PorygonView extends ItemView {
 	onClose(): Promise<void> {
 		this.contentEl.empty();
 		return Promise.resolve();
+	}
+
+	private registerInternalLinkHandlers(containerEl: HTMLElement): void {
+		this.registerDomEvent(containerEl, "click", (event: MouseEvent) => {
+			const target = event.target as HTMLElement | null;
+			const anchor = target?.closest("a.internal-link") as HTMLAnchorElement | null;
+			if (!anchor) {
+				return;
+			}
+
+			event.preventDefault();
+			const linktext = anchor.getAttribute("data-href") ?? anchor.getAttribute("href") ?? "";
+			if (!linktext) {
+				return;
+			}
+
+			const inNewLeaf = event.ctrlKey || event.metaKey || event.button === 1;
+			void this.plugin.app.workspace.openLinkText(linktext, "/", inNewLeaf);
+		});
+
+		let lastHoveredAnchor: HTMLAnchorElement | null = null;
+		this.registerDomEvent(containerEl, "pointerover", (event: PointerEvent) => {
+			const target = event.target as HTMLElement | null;
+			const anchor = target?.closest("a.internal-link") as HTMLAnchorElement | null;
+			if (!anchor) {
+				lastHoveredAnchor = null;
+				return;
+			}
+
+			if (anchor === lastHoveredAnchor) {
+				return;
+			}
+			lastHoveredAnchor = anchor;
+
+			const linktext = anchor.getAttribute("data-href") ?? "";
+			if (!linktext) {
+				return;
+			}
+
+			this.plugin.app.workspace.trigger("hover-link", {
+				event,
+				source: "porygon",
+				hoverParent: this,
+				targetEl: anchor,
+				linktext,
+				sourcePath: "/",
+			});
+		});
 	}
 
 	private render(): void {
@@ -271,7 +320,7 @@ export class PorygonView extends ItemView {
 		const contentEl = bubble.createDiv({ cls: "porygon-message-content" });
 		if (message.role === "porygon") {
 			contentEl.addClass("markdown-rendered");
-			void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "", this);
+			void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "/", this);
 			return;
 		}
 
@@ -291,7 +340,7 @@ export class PorygonView extends ItemView {
 			}, 0);
 		});
 		const contentEl = details.createDiv({ cls: "porygon-thinking-content markdown-rendered" });
-		void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "", this).then(() => {
+		void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "/", this).then(() => {
 			if (details.open) {
 				contentEl.scrollTop = contentEl.scrollHeight;
 			}
@@ -1444,6 +1493,8 @@ export class PorygonView extends ItemView {
 			};
 			await streamLocalAgent({
 				app: this.plugin.app,
+				semanticSearch: this.plugin.ragSemanticSearch,
+				getIndexProgress: () => this.plugin.ragIndexer.getProgress(),
 				ollamaHost: this.getOllamaBaseUrl(),
 				ollamaChatModel: this.plugin.settings.ollamaChatModel,
 				ollamaThinking: this.plugin.settings.ollamaThinking,

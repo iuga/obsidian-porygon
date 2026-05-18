@@ -328,24 +328,49 @@
 	background: transparent;
 }
 
-.porygon-settings-prompt-setting {
+.porygon-settings-section {
+	margin-top: var(--size-4-8);
+	padding-top: var(--size-4-2);
+}
+
+.porygon-settings-section:first-child {
+	margin-top: 0;
+	padding-top: 0;
+}
+
+.porygon-settings-prompt-setting,
+.porygon-settings-textarea-setting {
 	display: block;
 }
 
-.porygon-settings-prompt-setting .setting-item-info {
+.porygon-settings-prompt-setting .setting-item-info,
+.porygon-settings-textarea-setting .setting-item-info {
 	width: 100%;
 	margin-bottom: var(--size-4-3);
 }
 
-.porygon-settings-prompt-setting .setting-item-control {
+.porygon-settings-prompt-setting .setting-item-control,
+.porygon-settings-textarea-setting .setting-item-control {
 	width: 100%;
 }
 
-.porygon-settings-prompt {
+.porygon-settings-prompt,
+.porygon-settings-ignored-paths {
 	width: 100%;
-	min-height: 260px;
 	font-family: var(--font-monospace);
 	line-height: var(--line-height-normal);
+}
+
+.porygon-settings-prompt {
+	min-height: 260px;
+}
+
+.porygon-settings-sync-warning {
+	margin: var(--size-4-3) 0;
+	padding: var(--size-4-3);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	color: var(--text-muted);
 }
 
 .porygon-message-input:hover,

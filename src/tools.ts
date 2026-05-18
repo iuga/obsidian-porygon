@@ -1,8 +1,10 @@
 import { tool } from "@langchain/core/tools";
 import { App, normalizePath, prepareSimpleSearch, TFile, TFolder } from "obsidian";
+import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { z } from "zod";
 
 const DEFAULT_VIEW_LIMIT = 2000;
+const SEMANTIC_SNIPPET_MAX_CHARS = 320;
 const MAX_VIEW_SIZE_BYTES = 200 * 1024;
 const MAX_VIEW_LINE_LENGTH = 2000;
 
@@ -191,6 +193,54 @@ export function createEditTool(app: App) {
 	);
 }
 
+export function createSemanticSearchTool(app: App, semanticSearch: RagSemanticSearchService, getProgress: () => RagIndexProgress) {
+	return tool(
+		async ({ query, limit = DEFAULT_SEMANTIC_SEARCH_LIMIT }: { query: string; limit?: number }): Promise<string> => {
+			const results = await semanticSearch.search({ query, limit });
+			if (results.length === 0) {
+				return JSON.stringify({ results: [], message: getSemanticSearchFallbackMessage(getProgress()) });
+			}
+
+			return JSON.stringify({
+				results: results.map((result) => ({
+					path: result.path,
+					wikilink: buildSemanticWikilink(app, result.path),
+					title: result.title,
+					chunk_index: result.chunkIndex,
+					score: result.score,
+					snippet: truncateSnippet(result.text),
+				})),
+			});
+		},
+		{
+			name: "semantic_search",
+			description: "Semantically searches indexed Markdown notes using natural language and returns JSON results with matching note paths, wikilinks, similarity scores, and snippets. Use this for vague or contextual requests about notes, projects, concepts, people, meetings, ideas, or related information when exact keyword search may miss relevant files. Use view afterwards when you need full file context.",
+			schema: z.object({
+				intent: intentSchema,
+				query: z.string().describe("Natural-language description of the vault information to find."),
+				limit: z.number().int().min(1).max(20).optional().default(DEFAULT_SEMANTIC_SEARCH_LIMIT).describe(`Maximum number of matching chunks to return. Defaults to ${DEFAULT_SEMANTIC_SEARCH_LIMIT}.`),
+			}),
+		}
+	);
+}
+
+function buildSemanticWikilink(app: App, path: string): string {
+	const file = app.vault.getAbstractFileByPath(path);
+	if (file instanceof TFile) {
+		return `[[${app.metadataCache.fileToLinktext(file, "", true)}]]`;
+	}
+
+	return `[[${path.replace(/\.md$/, "")}]]`;
+}
+
+function truncateSnippet(text: string): string {
+	if (text.length <= SEMANTIC_SNIPPET_MAX_CHARS) {
+		return text;
+	}
+
+	return `${text.slice(0, SEMANTIC_SNIPPET_MAX_CHARS)}…`;
+}
+
 export function createRenameTool(app: App) {
 	return tool(
 		async ({ source_path: sourcePath, destination_path: destinationPath }: { source_path: string; destination_path: string }): Promise<string> => {
@@ -243,8 +293,20 @@ export function createRenameTool(app: App) {
 	);
 }
 
-export function createAgentTools(app: App) {
-	return [currentTimestampTool, createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app)];
+export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress) {
+	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app)];
+}
+
+function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {
+	if (progress.status === "indexing") {
+		return `Semantic index is still building: ${progress.indexedFiles} / ${progress.totalFiles} notes indexed. Use search, list, or view for exact lookup while indexing continues.`;
+	}
+
+	if (progress.status === "error") {
+		return `Semantic index is unavailable due to an indexing error: ${progress.lastError ?? "unknown error"}. Use search, list, or view as fallback.`;
+	}
+
+	return "No semantic index results found. The index may be empty or unavailable. Use search, list, or view as fallback.";
 }
 
 function normalizeMarkdownPath(filenameMd: string): string {

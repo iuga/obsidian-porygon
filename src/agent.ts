@@ -4,6 +4,7 @@ import { ChatOllama } from "@langchain/ollama";
 import { App } from "obsidian";
 import { createAgent } from "langchain";
 import defaultSystemPrompt from "../prompts/system.md";
+import { RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { createAgentTools } from "./tools";
 
 export type AgentChatRole = "user" | "porygon" | "file";
@@ -15,6 +16,8 @@ export interface AgentChatMessage {
 
 export interface LocalAgentOptions {
 	app: App;
+	semanticSearch: RagSemanticSearchService;
+	getIndexProgress: () => RagIndexProgress;
 	ollamaHost: string;
 	ollamaChatModel: string;
 	ollamaThinking: boolean;
@@ -58,7 +61,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			think: options.ollamaThinking,
 			maxRetries: 0,
 		}),
-		tools: createAgentTools(options.app),
+		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress),
 		systemPrompt: DEFAULT_SYSTEM_PROMPT,
 	});
 
