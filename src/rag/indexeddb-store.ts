@@ -1,12 +1,11 @@
 import { DBSchema, IDBPDatabase, IDBPTransaction, openDB } from "idb";
-import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagMetadataRecord, RagVectorRecord } from "./types";
+import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagVectorRecord } from "./types";
 
 const RAG_DATABASE_NAME = "porygon-rag";
 const RAG_DATABASE_VERSION = 1;
 const FILES_STORE = "files";
 const CHUNKS_STORE = "chunks";
 const VECTORS_STORE = "vectors";
-const METADATA_STORE = "metadata";
 
 interface PorygonRagDatabase extends DBSchema {
 	files: {
@@ -35,11 +34,9 @@ interface PorygonRagDatabase extends DBSchema {
 			pathAndEmbeddingModel: [string, string];
 		};
 	};
-	metadata: {
-		key: string;
-		value: RagMetadataRecord;
-	};
 }
+
+type RagStoreNames = ["files", "chunks", "vectors"];
 
 export class RagIndexedDbStore {
 	private dbPromise: Promise<IDBPDatabase<PorygonRagDatabase>> | null = null;
@@ -90,20 +87,29 @@ export class RagIndexedDbStore {
 	}
 
 	async deleteFile(path: string): Promise<void> {
+		await this.deleteFiles([path]);
+	}
+
+	async deleteFiles(paths: string[]): Promise<void> {
+		if (paths.length === 0) {
+			return;
+		}
+
 		const db = await this.getOpenDatabase();
 		const tx = db.transaction([FILES_STORE, CHUNKS_STORE, VECTORS_STORE], "readwrite");
-		await this.deleteFileRecordsInTransaction(tx, path);
+		for (const path of paths) {
+			await this.deleteFileRecordsInTransaction(tx, path);
+		}
 		await tx.done;
 	}
 
 	async clearIndex(): Promise<void> {
 		const db = await this.getOpenDatabase();
-		const tx = db.transaction([FILES_STORE, CHUNKS_STORE, VECTORS_STORE, METADATA_STORE], "readwrite");
+		const tx = db.transaction([FILES_STORE, CHUNKS_STORE, VECTORS_STORE], "readwrite");
 		await Promise.all([
 			tx.objectStore(FILES_STORE).clear(),
 			tx.objectStore(CHUNKS_STORE).clear(),
 			tx.objectStore(VECTORS_STORE).clear(),
-			tx.objectStore(METADATA_STORE).clear(),
 		]);
 		await tx.done;
 	}
@@ -139,20 +145,6 @@ export class RagIndexedDbStore {
 		return chunks.filter((chunk): chunk is RagChunkRecord => chunk !== undefined);
 	}
 
-	async getMetadata(key: string): Promise<RagMetadataRecord | undefined> {
-		const db = await this.getOpenDatabase();
-		return db.get(METADATA_STORE, key);
-	}
-
-	async setMetadata(key: string, value: unknown): Promise<void> {
-		const db = await this.getOpenDatabase();
-		await db.put(METADATA_STORE, {
-			key,
-			value,
-			updatedAt: Date.now(),
-		});
-	}
-
 	private getOpenDatabase(): Promise<IDBPDatabase<PorygonRagDatabase>> {
 		this.dbPromise ??= openDB<PorygonRagDatabase>(RAG_DATABASE_NAME, RAG_DATABASE_VERSION, {
 			upgrade(db) {
@@ -175,16 +167,12 @@ export class RagIndexedDbStore {
 					vectorsStore.createIndex("embeddingModel", "embeddingModel");
 					vectorsStore.createIndex("pathAndEmbeddingModel", ["path", "embeddingModel"]);
 				}
-
-				if (!db.objectStoreNames.contains(METADATA_STORE)) {
-					db.createObjectStore(METADATA_STORE, { keyPath: "key" });
-				}
 			},
 		});
 		return this.dbPromise;
 	}
 
-	private async deleteFileRecordsInTransaction(tx: IDBPTransaction<PorygonRagDatabase, ["files", "chunks", "vectors"], "readwrite">, path: string): Promise<void> {
+	private async deleteFileRecordsInTransaction(tx: IDBPTransaction<PorygonRagDatabase, RagStoreNames, "readwrite">, path: string): Promise<void> {
 		const filesStore = tx.objectStore(FILES_STORE);
 		const chunksStore = tx.objectStore(CHUNKS_STORE);
 		const vectorsStore = tx.objectStore(VECTORS_STORE);

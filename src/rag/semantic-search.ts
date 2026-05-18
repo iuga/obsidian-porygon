@@ -125,5 +125,5 @@ export function cosineSimilarity(left: Float32Array, right: Float32Array): numbe
 		return Number.NEGATIVE_INFINITY;
 	}
 
-	return dotProduct / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+	return dotProduct / Math.sqrt(leftMagnitude * rightMagnitude);
 }

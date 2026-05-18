@@ -5,6 +5,8 @@ import { ONBOARDING_DEFAULTS } from "./settings";
 
 export class PorygonSettingTab extends PluginSettingTab {
 	plugin: PorygonPlugin;
+	private statusSetting: Setting | null = null;
+	private unsubscribeProgress: (() => void) | null = null;
 
 	constructor(plugin: PorygonPlugin) {
 		super(plugin.app, plugin);
@@ -90,7 +92,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 				}));
 
 		this.renderSectionHeading(containerEl, "Semantic search", "Configure local semantic indexing.");
-		this.renderSemanticIndexStatus(containerEl, this.plugin.ragIndexer.getProgress());
+		this.statusSetting = new Setting(containerEl).setName("Index status");
+		this.subscribeToIndexProgress();
 
 		const ignoredPathsSetting = new Setting(containerEl)
 			.setName("Ignored semantic index paths")
@@ -109,10 +112,17 @@ export class PorygonSettingTab extends PluginSettingTab {
 		ignoredPathsSetting.settingEl.addClass("porygon-settings-textarea-setting");
 	}
 
-	private renderSemanticIndexStatus(containerEl: HTMLElement, progress: RagIndexProgress): void {
-		new Setting(containerEl)
-			.setName("Index status")
-			.setDesc(this.getSemanticIndexStatusText(progress));
+	hide(): void {
+		this.unsubscribeProgress?.();
+		this.unsubscribeProgress = null;
+		this.statusSetting = null;
+	}
+
+	private subscribeToIndexProgress(): void {
+		this.unsubscribeProgress?.();
+		this.unsubscribeProgress = this.plugin.ragIndexer.onProgress((progress) => {
+			this.statusSetting?.setDesc(this.getSemanticIndexStatusText(progress));
+		});
 	}
 
 	private getSemanticIndexStatusText(progress: RagIndexProgress): string {

@@ -30,12 +30,6 @@ export interface RagVectorRecord {
 	createdAt: number;
 }
 
-export interface RagMetadataRecord {
-	key: string;
-	value: unknown;
-	updatedAt: number;
-}
-
 export interface RagIndexedFileInput {
 	file: RagFileRecord;
 	chunks: RagChunkRecord[];

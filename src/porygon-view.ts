@@ -193,12 +193,19 @@ export class PorygonView extends ItemView {
 			void this.plugin.app.workspace.openLinkText(linktext, "/", inNewLeaf);
 		});
 
-		this.registerDomEvent(containerEl, "mouseover", (event: MouseEvent) => {
+		let lastHoveredAnchor: HTMLAnchorElement | null = null;
+		this.registerDomEvent(containerEl, "pointerover", (event: PointerEvent) => {
 			const target = event.target as HTMLElement | null;
 			const anchor = target?.closest("a.internal-link") as HTMLAnchorElement | null;
 			if (!anchor) {
+				lastHoveredAnchor = null;
 				return;
 			}
+
+			if (anchor === lastHoveredAnchor) {
+				return;
+			}
+			lastHoveredAnchor = anchor;
 
 			const linktext = anchor.getAttribute("data-href") ?? "";
 			if (!linktext) {

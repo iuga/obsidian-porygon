@@ -1,15 +1,20 @@
 import { OllamaEmbeddings } from "@langchain/ollama";
 import { App, TFile } from "obsidian";
+import picomatch from "picomatch";
 import { PorygonPluginSettings } from "../settings";
 import { buildMarkdownChunks } from "./chunks";
 import { float32ArrayToArrayBuffer, RagIndexedDbStore } from "./indexeddb-store";
 import { RagChunkRecord, RagFileRecord, RagIndexProgress, RagVectorRecord } from "./types";
 
-const INDEX_BATCH_SIZE = 1;
+const INDEX_BATCH_SIZE = 10;
 const INDEX_YIELD_MS = 25;
 const MODIFY_DEBOUNCE_MS = 1500;
+const SETTINGS_RECONCILE_DEBOUNCE_MS = 1000;
 const MAX_CHUNKS_PER_FILE = 256;
 const EMBEDDING_BATCH_SIZE = 16;
+
+type IgnoreMatcher = (path: string) => boolean;
+type PrefetchedFile = { content: string; contentHash: string };
 
 export class RagIndexer {
 	private app: App;
@@ -17,10 +22,13 @@ export class RagIndexer {
 	private store: RagIndexedDbStore;
 	private queue: TFile[] = [];
 	private queuedPaths = new Set<string>();
+	private prefetchedFiles = new Map<string, PrefetchedFile>();
 	private isRunning = false;
 	private isReconciling = false;
 	private disposed = false;
 	private cachedEmbeddings: { host: string; model: string; client: OllamaEmbeddings } | null = null;
+	private ignoreMatcher: IgnoreMatcher;
+	private ignoreSource = "";
 	private progress: RagIndexProgress = {
 		status: "idle",
 		indexedFiles: 0,
@@ -29,11 +37,14 @@ export class RagIndexer {
 	};
 	private listeners = new Set<(progress: RagIndexProgress) => void>();
 	private modifyDebounceTimeouts = new Map<string, number>();
+	private settingsReconcileTimeout: number | null = null;
 
 	constructor(app: App, settings: PorygonPluginSettings, store: RagIndexedDbStore) {
 		this.app = app;
 		this.settings = settings;
 		this.store = store;
+		this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
+		this.ignoreSource = settings.ragIgnoredPaths;
 	}
 
 	getProgress(): RagIndexProgress {
@@ -52,8 +63,13 @@ export class RagIndexer {
 			window.clearTimeout(timeout);
 		}
 		this.modifyDebounceTimeouts.clear();
+		if (this.settingsReconcileTimeout !== null) {
+			window.clearTimeout(this.settingsReconcileTimeout);
+			this.settingsReconcileTimeout = null;
+		}
 		this.queue = [];
 		this.queuedPaths.clear();
+		this.prefetchedFiles.clear();
 		this.listeners.clear();
 		this.cachedEmbeddings = null;
 	}
@@ -68,39 +84,66 @@ export class RagIndexer {
 			const markdownFiles = this.app.vault.getMarkdownFiles().filter((file) => !this.isIgnored(file.path));
 			const vaultPaths = new Set(markdownFiles.map((file) => file.path));
 			const indexedFiles = await this.store.getAllFiles();
-			await Promise.all(indexedFiles
+			const orphanedPaths = indexedFiles
 				.filter((file) => !vaultPaths.has(file.path))
-				.map((file) => this.store.deleteFile(file.path)));
+				.map((file) => file.path);
+			if (orphanedPaths.length > 0) {
+				await this.store.deleteFiles(orphanedPaths);
+			}
 
-			this.setProgress({
-				status: markdownFiles.length > 0 ? "indexing" : "ready",
-				indexedFiles: 0,
-				totalFiles: markdownFiles.length,
-				queuedFiles: this.queue.length,
-				lastError: undefined,
-			});
-
+			// Index stored records by path for cheap freshness lookup.
+			const indexedByPath = new Map(indexedFiles.map((file) => [file.path, file]));
 			const embeddingConfig = this.getEmbeddingConfig();
+
+			// Decide work up front so progress counters reflect reality (#9).
+			const staleFiles: TFile[] = [];
+			let freshCount = 0;
 			for (const file of markdownFiles) {
 				if (this.disposed) {
 					return;
 				}
 
+				const stored = indexedByPath.get(file.path);
+				// Cheap path (#1): mtime + size + embeddingConfig match → trust it,
+				// skip the read and SHA-256.
+				const cheapMatch = stored
+					&& stored.mtime === file.stat.mtime
+					&& stored.size === file.stat.size
+					&& stored.embeddingConfig === embeddingConfig;
+				if (cheapMatch) {
+					freshCount += 1;
+					continue;
+				}
+
+				// Fall back to content hash for ambiguous cases (e.g. Sync rewrote
+				// the file with an unchanged body but a new mtime).
 				const content = await this.app.vault.cachedRead(file);
 				const contentHash = await hashText(content);
-				const isFresh = await this.store.isFileFresh({
-					path: file.path,
-					mtime: file.stat.mtime,
-					size: file.stat.size,
-					contentHash,
-					embeddingConfig,
-				});
-				if (!isFresh) {
-					this.enqueue(file, { content, contentHash });
-				} else {
-					this.setProgress({ indexedFiles: this.progress.indexedFiles + 1 });
+				const fullyFresh = stored
+					&& stored.contentHash === contentHash
+					&& stored.embeddingConfig === embeddingConfig
+					&& stored.size === file.stat.size;
+				if (fullyFresh) {
+					freshCount += 1;
+					continue;
 				}
+
+				staleFiles.push(file);
+				// Pass the freshly read content downstream so indexFile can reuse it (#6).
+				this.prefetchedFiles.set(file.path, { content, contentHash });
 				await sleep(0);
+			}
+
+			this.setProgress({
+				status: staleFiles.length > 0 ? "indexing" : "ready",
+				indexedFiles: freshCount,
+				totalFiles: markdownFiles.length,
+				queuedFiles: this.queue.length + staleFiles.length,
+				lastError: undefined,
+			});
+
+			for (const file of staleFiles) {
+				this.enqueue(file);
 			}
 
 			this.start();
@@ -109,7 +152,7 @@ export class RagIndexer {
 		}
 	}
 
-	enqueue(file: TFile, _prefetched?: { content: string; contentHash: string }): void {
+	enqueue(file: TFile): void {
 		if (this.disposed || this.isIgnored(file.path) || this.queuedPaths.has(file.path)) {
 			return;
 		}
@@ -136,6 +179,9 @@ export class RagIndexer {
 
 		const timeout = window.setTimeout(() => {
 			this.modifyDebounceTimeouts.delete(file.path);
+			// Local-modify path invalidates any reconcile prefetch we may have cached
+			// before the user kept typing.
+			this.prefetchedFiles.delete(file.path);
 			this.enqueue(file);
 		}, MODIFY_DEBOUNCE_MS);
 		this.modifyDebounceTimeouts.set(file.path, timeout);
@@ -150,19 +196,43 @@ export class RagIndexer {
 
 		this.queue = this.queue.filter((file) => file.path !== path);
 		this.queuedPaths.delete(path);
+		this.prefetchedFiles.delete(path);
 		await this.store.deleteFile(path);
 		this.setProgress({ queuedFiles: this.queue.length });
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
-		const shouldReconcile = this.settings.ollamaHost !== settings.ollamaHost ||
-			this.settings.ollamaEmbeddingModel !== settings.ollamaEmbeddingModel ||
-			this.settings.ragIgnoredPaths !== settings.ragIgnoredPaths;
+		const hostOrModelChanged = this.settings.ollamaHost !== settings.ollamaHost ||
+			this.settings.ollamaEmbeddingModel !== settings.ollamaEmbeddingModel;
+		const ignoreChanged = this.ignoreSource !== settings.ragIgnoredPaths;
 		this.settings = settings;
-		if (shouldReconcile) {
-			this.cachedEmbeddings = null;
-			void this.reconcile();
+
+		if (ignoreChanged) {
+			this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
+			this.ignoreSource = settings.ragIgnoredPaths;
 		}
+
+		if (hostOrModelChanged) {
+			this.cachedEmbeddings = null;
+		}
+
+		if (hostOrModelChanged || ignoreChanged) {
+			this.scheduleReconcile();
+		}
+	}
+
+	private scheduleReconcile(): void {
+		if (this.disposed) {
+			return;
+		}
+
+		if (this.settingsReconcileTimeout !== null) {
+			window.clearTimeout(this.settingsReconcileTimeout);
+		}
+		this.settingsReconcileTimeout = window.setTimeout(() => {
+			this.settingsReconcileTimeout = null;
+			void this.reconcile();
+		}, SETTINGS_RECONCILE_DEBOUNCE_MS);
 	}
 
 	private start(): void {
@@ -175,31 +245,36 @@ export class RagIndexer {
 	}
 
 	private async processQueue(): Promise<void> {
-		try {
-			while (this.queue.length > 0) {
-				if (this.disposed) {
-					return;
-				}
+		while (this.queue.length > 0) {
+			if (this.disposed) {
+				this.isRunning = false;
+				return;
+			}
 
-				const batch = this.queue.splice(0, INDEX_BATCH_SIZE);
-				for (const file of batch) {
-					this.queuedPaths.delete(file.path);
+			const batch = this.queue.splice(0, INDEX_BATCH_SIZE);
+			for (const file of batch) {
+				this.queuedPaths.delete(file.path);
+				try {
 					await this.indexFile(file);
 					this.setProgress({
 						indexedFiles: this.progress.indexedFiles + 1,
 						queuedFiles: this.queue.length,
 						lastIndexedAt: Date.now(),
 					});
+				} catch (error) {
+					// Record the error but keep draining the queue so a single bad
+					// file (e.g. Ollama hiccup) does not stall the whole index (#2).
+					console.error(`[Porygon RAG] failed to index ${file.path}`, error);
+					this.setProgress({
+						status: "error",
+						queuedFiles: this.queue.length,
+						lastError: error instanceof Error ? error.message : String(error),
+					});
+				} finally {
+					this.prefetchedFiles.delete(file.path);
 				}
-				await sleep(INDEX_YIELD_MS);
 			}
-		} catch (error) {
-			this.setProgress({
-				status: "error",
-				lastError: error instanceof Error ? error.message : String(error),
-			});
-			this.isRunning = false;
-			return;
+			await sleep(INDEX_YIELD_MS);
 		}
 
 		this.isRunning = false;
@@ -210,12 +285,20 @@ export class RagIndexer {
 			return;
 		}
 
-		this.setProgress({ status: "ready", queuedFiles: 0 });
+		// Preserve the error status if any file failed during this drain so the
+		// user can still see what went wrong; otherwise mark the index as ready.
+		if (this.progress.status !== "error") {
+			this.setProgress({ status: "ready", queuedFiles: 0 });
+		} else {
+			this.setProgress({ queuedFiles: 0 });
+		}
 	}
 
 	private async indexFile(file: TFile): Promise<void> {
-		const content = await this.app.vault.cachedRead(file);
-		const contentHash = await hashText(content);
+		// Reuse content + hash captured during reconcile when available (#6).
+		const prefetched = this.prefetchedFiles.get(file.path);
+		const content = prefetched?.content ?? await this.app.vault.cachedRead(file);
+		const contentHash = prefetched?.contentHash ?? await hashText(content);
 		const chunks = await buildMarkdownChunks({
 			path: file.path,
 			basename: file.basename,
@@ -282,11 +365,7 @@ export class RagIndexer {
 	}
 
 	private isIgnored(path: string): boolean {
-		const patterns = this.settings.ragIgnoredPaths
-			.split(/\r?\n/)
-			.map((pattern) => pattern.trim())
-			.filter(Boolean);
-		return patterns.some((pattern) => matchesIgnoredPath(path, pattern));
+		return this.ignoreMatcher(path);
 	}
 
 	private getEmbeddingConfig(): string {
@@ -301,42 +380,41 @@ export class RagIndexer {
 	}
 }
 
-// Standard glob semantics:
-//   - `*` matches any run of characters except `/`
-//   - `**` matches across path separators
-//   - a trailing `/` (or a bare folder name) matches everything inside
-export function matchesIgnoredPath(path: string, pattern: string): boolean {
-	const normalizedPath = normalizeIndexPath(path);
-	const normalizedPattern = normalizeIndexPath(pattern);
-	if (!normalizedPattern) {
-		return false;
+// Exposed for unit testing; consumers should go through RagIndexer.
+export function compileIgnoreMatcher(source: string): IgnoreMatcher {
+	const patterns = parseIgnorePatterns(source);
+	if (patterns.length === 0) {
+		return () => false;
 	}
 
-	if (normalizedPattern.includes("*")) {
-		const regex = globToRegExp(normalizedPattern);
-		return regex.test(normalizedPath);
-	}
-
-	return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern.replace(/\/$/, "")}/`);
+	const isMatch = picomatch(patterns, { dot: true });
+	return (path) => isMatch(normalizeIndexPath(path));
 }
 
-function globToRegExp(pattern: string): RegExp {
-	let regex = "";
-	for (let index = 0; index < pattern.length; index++) {
-		const char = pattern[index] ?? "";
-		if (char === "*") {
-			if (pattern[index + 1] === "*") {
-				regex += ".*";
-				index += 1;
-			} else {
-				regex += "[^/]*";
-			}
+function parseIgnorePatterns(source: string): string[] {
+	const expanded: string[] = [];
+	for (const raw of source.split(/\r?\n/)) {
+		const pattern = normalizeIndexPath(raw);
+		if (!pattern) {
 			continue;
 		}
 
-		regex += /[.+?^${}()|[\]\\]/.test(char) ? `\\${char}` : char;
+		// "Archive/" → "Archive/**" so trailing slashes match folder contents.
+		if (pattern.endsWith("/")) {
+			expanded.push(`${pattern}**`);
+			continue;
+		}
+
+		// Bare folder names like "Archive" should match both the folder and its
+		// contents to preserve the previous (homegrown) behavior.
+		if (!pattern.includes("*") && !pattern.includes("/")) {
+			expanded.push(pattern, `${pattern}/**`);
+			continue;
+		}
+
+		expanded.push(pattern);
 	}
-	return new RegExp(`^${regex}$`);
+	return expanded;
 }
 
 async function hashText(text: string): Promise<string> {
