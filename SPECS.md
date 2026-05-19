@@ -37,3 +37,7 @@ Porygon added a `/sessions` command for loading saved chats from `porygon/sessio
 
 ## 0.3.0: Local semantic search over the vault
 Porygon adds a local RAG foundation for semantic vault search using the same Ollama provider as chat: Markdown notes are chunked with LangChain text splitters, embedded with the configured Ollama embeddings model, and persisted in an IndexedDB-backed index under `src/rag/*`. The index is maintained in the background through startup reconciliation and Obsidian vault create/modify/delete/rename events, supports ignored-path settings and model/host freshness checks, exposes index status in settings, and adds a `semantic_search` agent tool that returns matching note paths, wikilinks, scores, and snippets for contextual note discovery while keeping existing exact `list`, `search`, and `view` tools as fallbacks.
+
+## 0.3.1: Accurate RAG index counters and startup hardening
+Porygon fixes a startup double-counting bug in the semantic index, prevents re-embedding of unchanged notes on launch and on stray re-enqueues, and makes the settings status row always reflect the real number of indexed and total notes.
+

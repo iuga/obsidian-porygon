@@ -6,7 +6,7 @@ import { buildMarkdownChunks } from "./chunks";
 import { float32ArrayToArrayBuffer, RagIndexedDbStore } from "./indexeddb-store";
 import { RagChunkRecord, RagFileRecord, RagIndexProgress, RagVectorRecord } from "./types";
 
-const INDEX_BATCH_SIZE = 10;
+const INDEX_BATCH_SIZE = 2;
 const INDEX_YIELD_MS = 25;
 const MODIFY_DEBOUNCE_MS = 1500;
 const SETTINGS_RECONCILE_DEBOUNCE_MS = 1000;
@@ -91,27 +91,23 @@ export class RagIndexer {
 				await this.store.deleteFiles(orphanedPaths);
 			}
 
-			// Index stored records by path for cheap freshness lookup.
 			const indexedByPath = new Map(indexedFiles.map((file) => [file.path, file]));
 			const embeddingConfig = this.getEmbeddingConfig();
 
-			// Decide work up front so progress counters reflect reality (#9).
 			const staleFiles: TFile[] = [];
-			let freshCount = 0;
 			for (const file of markdownFiles) {
 				if (this.disposed) {
 					return;
 				}
 
 				const stored = indexedByPath.get(file.path);
-				// Cheap path (#1): mtime + size + embeddingConfig match → trust it,
+				// Cheap path: mtime + size + embeddingConfig match → trust it,
 				// skip the read and SHA-256.
 				const cheapMatch = stored
 					&& stored.mtime === file.stat.mtime
 					&& stored.size === file.stat.size
 					&& stored.embeddingConfig === embeddingConfig;
 				if (cheapMatch) {
-					freshCount += 1;
 					continue;
 				}
 
@@ -124,21 +120,17 @@ export class RagIndexer {
 					&& stored.embeddingConfig === embeddingConfig
 					&& stored.size === file.stat.size;
 				if (fullyFresh) {
-					freshCount += 1;
 					continue;
 				}
 
 				staleFiles.push(file);
-				// Pass the freshly read content downstream so indexFile can reuse it (#6).
+				// Pass the freshly read content downstream so indexFile can reuse it.
 				this.prefetchedFiles.set(file.path, { content, contentHash });
 				await sleep(0);
 			}
 
-			this.setProgress({
+			await this.refreshProgress({
 				status: staleFiles.length > 0 ? "indexing" : "ready",
-				indexedFiles: freshCount,
-				totalFiles: markdownFiles.length,
-				queuedFiles: this.queue.length + staleFiles.length,
 				lastError: undefined,
 			});
 
@@ -159,11 +151,7 @@ export class RagIndexer {
 
 		this.queue.push(file);
 		this.queuedPaths.add(file.path);
-		this.setProgress({
-			status: "indexing",
-			queuedFiles: this.queue.length,
-			totalFiles: Math.max(this.progress.totalFiles, this.progress.indexedFiles + this.queue.length),
-		});
+		void this.refreshProgress({ status: "indexing" });
 		this.start();
 	}
 
@@ -198,7 +186,7 @@ export class RagIndexer {
 		this.queuedPaths.delete(path);
 		this.prefetchedFiles.delete(path);
 		await this.store.deleteFile(path);
-		this.setProgress({ queuedFiles: this.queue.length });
+		await this.refreshProgress();
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
@@ -256,18 +244,13 @@ export class RagIndexer {
 				this.queuedPaths.delete(file.path);
 				try {
 					await this.indexFile(file);
-					this.setProgress({
-						indexedFiles: this.progress.indexedFiles + 1,
-						queuedFiles: this.queue.length,
-						lastIndexedAt: Date.now(),
-					});
+					await this.refreshProgress({ lastIndexedAt: Date.now() });
 				} catch (error) {
 					// Record the error but keep draining the queue so a single bad
-					// file (e.g. Ollama hiccup) does not stall the whole index (#2).
+					// file (e.g. Ollama hiccup) does not stall the whole index.
 					console.error(`[Porygon RAG] failed to index ${file.path}`, error);
-					this.setProgress({
+					await this.refreshProgress({
 						status: "error",
-						queuedFiles: this.queue.length,
 						lastError: error instanceof Error ? error.message : String(error),
 					});
 				} finally {
@@ -288,17 +271,29 @@ export class RagIndexer {
 		// Preserve the error status if any file failed during this drain so the
 		// user can still see what went wrong; otherwise mark the index as ready.
 		if (this.progress.status !== "error") {
-			this.setProgress({ status: "ready", queuedFiles: 0 });
+			await this.refreshProgress({ status: "ready" });
 		} else {
-			this.setProgress({ queuedFiles: 0 });
+			await this.refreshProgress();
 		}
 	}
 
 	private async indexFile(file: TFile): Promise<void> {
-		// Reuse content + hash captured during reconcile when available (#6).
+		// Reuse content + hash captured during reconcile when available.
 		const prefetched = this.prefetchedFiles.get(file.path);
 		const content = prefetched?.content ?? await this.app.vault.cachedRead(file);
 		const contentHash = prefetched?.contentHash ?? await hashText(content);
+
+		// Defensive freshness check: skip work when an event (e.g. rename) re-enqueues
+		// a file that is already up to date in the store.
+		const embeddingConfig = this.getEmbeddingConfig();
+		const stored = await this.store.getFile(file.path);
+		if (stored
+			&& stored.size === file.stat.size
+			&& stored.embeddingConfig === embeddingConfig
+			&& stored.contentHash === contentHash) {
+			return;
+		}
+
 		const chunks = await buildMarkdownChunks({
 			path: file.path,
 			basename: file.basename,
@@ -342,7 +337,7 @@ export class RagIndexer {
 			mtime: file.stat.mtime,
 			size: file.stat.size,
 			contentHash,
-			embeddingConfig: this.getEmbeddingConfig(),
+			embeddingConfig,
 			embeddingModel: this.settings.ollamaEmbeddingModel,
 			indexedAt: now,
 			chunkCount: cappedChunks.length,
@@ -377,6 +372,23 @@ export class RagIndexer {
 		for (const listener of this.listeners) {
 			listener(this.getProgress());
 		}
+	}
+
+	// Pulls authoritative counts from the source of truth (IndexedDB + vault)
+	// so the UI never shows accumulated drift. `overrides` is only used for
+	// status, lastError, and lastIndexedAt — never for the counters.
+	private async refreshProgress(overrides: Partial<RagIndexProgress> = {}): Promise<void> {
+		const indexedFiles = await this.store.countFiles();
+		const totalFiles = this.app.vault
+			.getMarkdownFiles()
+			.filter((file) => !this.isIgnored(file.path))
+			.length;
+		this.setProgress({
+			...overrides,
+			indexedFiles,
+			totalFiles,
+			queuedFiles: this.queue.length,
+		});
 	}
 }
 

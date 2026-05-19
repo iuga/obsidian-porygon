@@ -26,8 +26,12 @@ export default class PorygonPlugin extends Plugin {
 			void this.activateView();
 		});
 
-		this.registerRagIndexEvents();
 		this.app.workspace.onLayoutReady(() => {
+			// Register vault listeners only after layout-ready so we don't react
+			// to the synthetic `create` events Obsidian fires while scanning the
+			// vault on startup. Without this, every existing note would be
+			// re-embedded on every launch.
+			this.registerRagIndexEvents();
 			void this.ragIndexer.reconcile();
 		});
 	}

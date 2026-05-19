@@ -57,6 +57,11 @@ export class RagIndexedDbStore {
 		return db.getAll(FILES_STORE);
 	}
 
+	async countFiles(): Promise<number> {
+		const db = await this.getOpenDatabase();
+		return db.count(FILES_STORE);
+	}
+
 	async getFilesByEmbeddingModel(embeddingModel: string): Promise<RagFileRecord[]> {
 		const db = await this.getOpenDatabase();
 		return db.getAllFromIndex(FILES_STORE, "embeddingModel", embeddingModel);
