@@ -175,7 +175,7 @@ function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
 
 	let frontmatter: Record<string, unknown> = {};
 	try {
-		const parsed = parseYaml(match[1] ?? "");
+		const parsed: unknown = parseYaml(match[1] ?? "");
 		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
 			frontmatter = parsed as Record<string, unknown>;
 		}
