@@ -1,17 +1,20 @@
-import { Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS, LegacyPorygonPluginSettings } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
+import { SkillsService } from "./skills";
 
 export default class PorygonPlugin extends Plugin {
 	settings: PorygonPluginSettings;
 	ragIndexer: RagIndexer;
 	ragSemanticSearch: RagSemanticSearchService;
+	skills: SkillsService;
 	private ragStore: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		this.skills = new SkillsService(this.app);
 		this.ragStore = new RagIndexedDbStore();
 		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
 		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore);
@@ -32,6 +35,8 @@ export default class PorygonPlugin extends Plugin {
 			// vault on startup. Without this, every existing note would be
 			// re-embedded on every launch.
 			this.registerRagIndexEvents();
+			this.registerSkillEvents();
+			void this.skills.initialize();
 			void this.ragIndexer.reconcile();
 		});
 	}
@@ -68,6 +73,16 @@ export default class PorygonPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.ragIndexer.updateSettings(this.settings);
 		this.ragSemanticSearch.updateSettings(this.settings);
+	}
+
+	private registerSkillEvents(): void {
+		const handle = (file: TAbstractFile, oldPath?: string) => {
+			void this.skills.refreshIfManaged(file, oldPath);
+		};
+		this.registerEvent(this.app.vault.on("create", (file) => handle(file)));
+		this.registerEvent(this.app.vault.on("modify", (file) => handle(file)));
+		this.registerEvent(this.app.vault.on("delete", (file) => handle(file)));
+		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => handle(file, oldPath)));
 	}
 
 	private registerRagIndexEvents(): void {
