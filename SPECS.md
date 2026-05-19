@@ -1,4 +1,4 @@
-## 0.3.3: Agent skills loaded on demand
+## 0.4.0: Agent skills loaded on demand
 Porygon introduces a skills system that lets the agent extend its capabilities through Markdown files with YAML frontmatter (`name`, `description`) stored under `porygon/skills/` in the vault. Bundled skills shipped with the plugin are copied into the vault on first launch, parsed once at startup via a new `SkillsService` (after `onLayoutReady` so the vault is fully scanned) and cached, refreshing only when vault create/modify/delete/rename events touch the skills folder. The list is injected into the system prompt as an `<available_skills>` block, and a new `load_skill` agent tool reads the full skill body (without frontmatter) on demand using the exact location advertised in that block.
 
 ## 0.3.2: Expanded vault organization and graph agent tools

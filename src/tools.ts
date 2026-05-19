@@ -492,10 +492,10 @@ export function createLoadSkillTool(skills: SkillsService) {
 		},
 		{
 			name: "load_skill",
-			description: "Load a skill. IMPORTANT: This tool requires the EXACT skill location. Use only the skills described in the system message <available_skills>...</available_skills>. Returns the skill content without YAML frontmatter or an error message if not found.",
+			description: "Load a skill. IMPORTANT: Pass the EXACT value from the <location> field of the matching <skill> in <available_skills> (a full vault path such as 'porygon/skills/summarizer.md'). Do not shorten, rename, or guess. Returns the skill body without YAML frontmatter or an error message if not found.",
 			schema: z.object({
 				intent: intentSchema,
-				location: z.string().describe("EXACT skill location from <available_skills>. Must match exactly."),
+				location: z.string().describe("EXACT value from <location> in <available_skills> (full vault path, e.g. 'porygon/skills/summarizer.md')."),
 			}),
 		}
 	);

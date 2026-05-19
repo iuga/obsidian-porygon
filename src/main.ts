@@ -36,7 +36,9 @@ export default class PorygonPlugin extends Plugin {
 			// re-embedded on every launch.
 			this.registerRagIndexEvents();
 			this.registerSkillEvents();
-			void this.skills.initialize();
+			void this.skills.initialize().catch((error) => {
+				console.error("[Porygon Skills] failed to initialize", error);
+			});
 			void this.ragIndexer.reconcile();
 		});
 	}
@@ -77,7 +79,7 @@ export default class PorygonPlugin extends Plugin {
 
 	private registerSkillEvents(): void {
 		const handle = (file: TAbstractFile, oldPath?: string) => {
-			void this.skills.refreshIfManaged(file, oldPath);
+			this.skills.refreshIfManaged(file, oldPath);
 		};
 		this.registerEvent(this.app.vault.on("create", (file) => handle(file)));
 		this.registerEvent(this.app.vault.on("modify", (file) => handle(file)));

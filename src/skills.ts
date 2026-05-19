@@ -1,4 +1,4 @@
-import { App, normalizePath, TAbstractFile, TFile, TFolder } from "obsidian";
+import { App, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
 import summarizerSkill from "../skills/summarizer.md";
 
 export interface AgentSkill {
@@ -13,11 +13,12 @@ interface BundledSkill {
 }
 
 interface ParsedSkillMarkdown {
-	frontmatter: Record<string, string>;
+	frontmatter: Record<string, unknown>;
 	content: string;
 }
 
 const SKILLS_FOLDER = "porygon/skills";
+const REFRESH_DEBOUNCE_MS = 400;
 const BUNDLED_SKILLS: BundledSkill[] = [
 	{ filename: "summarizer.md", content: summarizerSkill },
 ];
@@ -25,6 +26,7 @@ const BUNDLED_SKILLS: BundledSkill[] = [
 export class SkillsService {
 	private skills: AgentSkill[] = [];
 	private initialized = false;
+	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly app: App) {}
 
@@ -34,7 +36,7 @@ export class SkillsService {
 		this.initialized = true;
 	}
 
-	getSkills(): AgentSkill[] {
+	getSkills(): readonly AgentSkill[] {
 		return this.skills;
 	}
 
@@ -47,23 +49,33 @@ export class SkillsService {
 		console.debug("[Porygon Skills] refreshed", { count: this.skills.length, skills: this.skills.map((skill) => skill.location) });
 	}
 
-	async refreshIfManaged(file: TAbstractFile, oldPath?: string): Promise<void> {
+	refreshIfManaged(file: TAbstractFile, oldPath?: string): void {
 		if (!this.initialized) {
 			return;
 		}
 
-		if (this.isManagedPath(file.path) || (oldPath && this.isManagedPath(oldPath))) {
-			await this.refresh();
+		const touchesSkills = this.isManagedPath(file.path) || (oldPath !== undefined && this.isManagedPath(oldPath));
+		if (!touchesSkills) {
+			return;
 		}
+
+		if (this.refreshTimer !== null) {
+			clearTimeout(this.refreshTimer);
+		}
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = null;
+			void this.refresh();
+		}, REFRESH_DEBOUNCE_MS);
 	}
 
 	async loadSkillContent(location: string): Promise<string> {
 		const normalizedLocation = normalizePath(location);
-		if (!this.skills.some((skill) => skill.location === normalizedLocation)) {
+		const skill = this.skills.find((candidate) => candidate.location === normalizedLocation);
+		if (!skill) {
 			return `Skill not found: ${location}. Use only exact locations from <available_skills>.`;
 		}
 
-		const file = this.app.vault.getAbstractFileByPath(normalizePath(`${SKILLS_FOLDER}/${normalizedLocation}`));
+		const file = this.app.vault.getAbstractFileByPath(skill.location);
 		if (!(file instanceof TFile)) {
 			return `Skill not found: ${location}. Use only exact locations from <available_skills>.`;
 		}
@@ -73,25 +85,35 @@ export class SkillsService {
 	}
 }
 
-export function buildAvailableSkillsPrompt(skills: AgentSkill[]): string {
+export function buildAvailableSkillsPrompt(skills: readonly AgentSkill[]): string {
 	if (skills.length === 0) {
 		return "";
 	}
 
-	let message = "<available_skills>\n";
-	for (const skill of skills) {
-		message += "  <skill>\n";
-		message += `    <name>${escapeXml(skill.name)}</name>\n`;
-		message += `    <description>${escapeXml(skill.description)}</description>\n`;
-		message += `    <location>${escapeXml(skill.location)}</location>\n`;
-		message += "  </skill>\n";
-	}
-	message += "</available_skills>";
-	return message;
+	const body = skills
+		.map((skill) => [
+			"  <skill>",
+			`    <name>${escapeXml(skill.name)}</name>`,
+			`    <description>${escapeXml(skill.description)}</description>`,
+			`    <location>${escapeXml(skill.location)}</location>`,
+			"  </skill>",
+		].join("\n"))
+		.join("\n");
+
+	return `<available_skills>\n${body}\n</available_skills>`;
 }
 
 async function ensureBundledSkills(app: App): Promise<void> {
+	const normalizedFolderPath = normalizePath(SKILLS_FOLDER);
+	const folderExistedBefore = app.vault.getAbstractFileByPath(normalizedFolderPath) instanceof TFolder;
+
 	await ensureFolder(app, SKILLS_FOLDER);
+
+	// Only seed bundled skills on first run. If the user deletes a bundled
+	// skill after that, we respect their choice and don't re-create it.
+	if (folderExistedBefore) {
+		return;
+	}
 
 	for (const skill of BUNDLED_SKILLS) {
 		const path = normalizePath(`${SKILLS_FOLDER}/${skill.filename}`);
@@ -102,7 +124,8 @@ async function ensureBundledSkills(app: App): Promise<void> {
 		try {
 			await app.vault.create(path, skill.content);
 		} catch (error) {
-			if (app.vault.getAbstractFileByPath(path) instanceof TFile || String(error).contains("File already exists")) {
+			// Race or pre-existing file: treat as no-op.
+			if (app.vault.getAbstractFileByPath(path) instanceof TFile) {
 				continue;
 			}
 
@@ -125,8 +148,10 @@ async function discoverSkills(app: App): Promise<AgentSkill[]> {
 
 		const rawContent = await app.vault.cachedRead(child);
 		const parsedSkill = parseSkillMarkdown(rawContent);
-		const name = parsedSkill.frontmatter.name?.trim();
-		const description = parsedSkill.frontmatter.description?.trim();
+		const rawName = parsedSkill.frontmatter.name;
+		const rawDescription = parsedSkill.frontmatter.description;
+		const name = typeof rawName === "string" ? rawName.trim() : "";
+		const description = typeof rawDescription === "string" ? rawDescription.trim() : "";
 		if (!name || !description) {
 			continue;
 		}
@@ -134,7 +159,7 @@ async function discoverSkills(app: App): Promise<AgentSkill[]> {
 		skills.push({
 			name,
 			description,
-			location: child.name,
+			location: child.path,
 		});
 	}
 
@@ -148,32 +173,20 @@ function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
 		return { frontmatter: {}, content: normalizedContent };
 	}
 
-	return {
-		frontmatter: parseFrontmatter(match[1] ?? ""),
-		content: normalizedContent.slice(match[0].length),
-	};
-}
-
-function parseFrontmatter(content: string): Record<string, string> {
-	const frontmatter: Record<string, string> = {};
-	let currentKey: string | null = null;
-
-	for (const line of content.split(/\r?\n/)) {
-		const keyValueMatch = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-		if (keyValueMatch) {
-			const key = keyValueMatch[1] ?? "";
-			const value = keyValueMatch[2] ?? "";
-			frontmatter[key] = unquoteYamlString(value.trim());
-			currentKey = key;
-			continue;
+	let frontmatter: Record<string, unknown> = {};
+	try {
+		const parsed = parseYaml(match[1] ?? "");
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			frontmatter = parsed as Record<string, unknown>;
 		}
-
-		if (currentKey && /^\s+/.test(line)) {
-			frontmatter[currentKey] = `${frontmatter[currentKey]} ${line.trim()}`.trim();
-		}
+	} catch (error) {
+		console.warn("[Porygon Skills] failed to parse skill frontmatter", error);
 	}
 
-	return frontmatter;
+	return {
+		frontmatter,
+		content: normalizedContent.slice(match[0].length),
+	};
 }
 
 async function ensureFolder(app: App, folderPath: string): Promise<void> {
@@ -195,7 +208,8 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	try {
 		await app.vault.createFolder(normalizedFolderPath);
 	} catch (error) {
-		if (app.vault.getAbstractFileByPath(normalizedFolderPath) instanceof TFolder || String(error).contains("Folder already exists")) {
+		// Race or pre-existing folder: treat as no-op.
+		if (app.vault.getAbstractFileByPath(normalizedFolderPath) instanceof TFolder) {
 			return;
 		}
 
@@ -203,14 +217,8 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 	}
 }
 
-function unquoteYamlString(value: string): string {
-	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-		return value.slice(1, -1);
-	}
-
-	return value;
-}
-
+// XML escaping for text nodes only. Attribute values are not used in the
+// generated prompt, so quotes don't need escaping here.
 function escapeXml(value: string): string {
 	return value
 		.replace(/&/g, "&amp;")
