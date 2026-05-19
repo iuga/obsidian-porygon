@@ -18,7 +18,7 @@ Chat with your notes and use Ollama-powered agent tools to search, edit, and int
 
 ### Agent tools
 
-Porygon includes built-in tools like **list**, **search**, **view**, **edit**, and **rename** so the assistant can understand, navigate, and modify your vault directly during a conversation.
+Porygon includes built-in tools like **list**, **search**, **semantic search**, **view**, **edit**, **rename**, **create folder**, **copy**, **active file**, and **backlinks** so the assistant can understand, navigate, organize, and modify your vault directly during a conversation.
 
 
 ### Personalize your experience

@@ -26,6 +26,37 @@ interface RenameResponseMetadata {
 	type: "file" | "folder";
 }
 
+interface CreateFolderToolInput {
+	folder_path: string;
+}
+
+interface CopyToolInput {
+	source_path: string;
+	destination_path: string;
+}
+
+interface ActiveFileToolInput {
+	include_metadata?: boolean;
+}
+
+interface BacklinksToolInput {
+	linkToMarkdownfile: string;
+}
+
+interface BacklinkReference {
+	link: string;
+	original: string;
+	display_text?: string;
+	line: number;
+}
+
+interface BacklinkResult {
+	source_path: string;
+	wikilink: string;
+	link_count: number;
+	references: BacklinkReference[];
+}
+
 const intentSchema = z.string().describe("Brief explanation in ten words or less of why you're calling this function and how it helps achieve the current goal. Use present participle form (e.g., 'Fetching...', 'Calculating...', 'Validating...'). Examples: 'Fetching all notes that contain order to gather context', 'Adding a new paragraph into the orders.md document'");
 
 export const currentTimestampTool = tool(
@@ -293,8 +324,167 @@ export function createRenameTool(app: App) {
 	);
 }
 
+export function createCreateFolderTool(app: App) {
+	return tool(
+		async ({ folder_path: folderPath }: CreateFolderToolInput): Promise<string> => {
+			const folder = normalizeVaultPath(folderPath);
+
+			try {
+				if (!folder) {
+					return "folder_path is required.";
+				}
+
+				if (app.vault.getAbstractFileByPath(folder)) {
+					return `folder path already exists: ${folder}`;
+				}
+
+				const parentPath = getParentPath(folder);
+				const parentFolder = parentPath ? app.vault.getAbstractFileByPath(parentPath) : null;
+				if (parentPath && !(parentFolder instanceof TFolder)) {
+					return `parent folder does not exist: ${parentPath}`;
+				}
+
+				const createdFolder = await app.vault.createFolder(folder);
+				return JSON.stringify({ path: createdFolder.path, type: "folder" });
+			} catch (error) {
+				return error instanceof Error ? error.message : String(error);
+			}
+		},
+		{
+			name: "create_folder",
+			description: "Create a new vault folder by exact vault-relative path using Obsidian Vault.createFolder. Use forward slashes. The folder must not already exist, and its parent folder must already exist. Use this before creating or moving notes into a new folder. Returns a JSON string with path and type.",
+			schema: z.object({
+				intent: intentSchema,
+				folder_path: z.string().describe("The exact vault-relative folder path to create. Use forward slashes. Do not include a trailing slash."),
+			}),
+		}
+	);
+}
+
+export function createCopyTool(app: App) {
+	return tool(
+		async ({ source_path: sourcePath, destination_path: destinationPath }: CopyToolInput): Promise<string> => {
+			const source = normalizeVaultPath(sourcePath);
+			const destination = normalizeVaultPath(destinationPath);
+			const file = app.vault.getAbstractFileByPath(source);
+
+			try {
+				if (!source) {
+					return "source_path is required.";
+				}
+
+				if (!destination) {
+					return "destination_path is required.";
+				}
+
+				if (!file) {
+					return `source path not found: ${source}`;
+				}
+
+				if (source === destination) {
+					return "destination_path is the same as source_path. No changes made.";
+				}
+
+				if (app.vault.getAbstractFileByPath(destination)) {
+					return `destination path already exists: ${destination}`;
+				}
+
+				const parentPath = getParentPath(destination);
+				const parentFolder = parentPath ? app.vault.getAbstractFileByPath(parentPath) : null;
+				if (parentPath && !(parentFolder instanceof TFolder)) {
+					return `destination parent folder does not exist: ${parentPath}`;
+				}
+
+				const copiedFile = await app.vault.copy(file, destination);
+				return stringifyRenameMetadata(source, copiedFile.path, copiedFile instanceof TFolder ? "folder" : "file");
+			} catch (error) {
+				return error instanceof Error ? error.message : String(error);
+			}
+		},
+		{
+			name: "copy",
+			description: "Copy a vault file or folder by exact vault-relative path using Obsidian Vault.copy. Use list first to confirm the source path and avoid filename guessing. source_path and destination_path must be vault-relative, use forward slashes, and destination_path must not already exist. Parent folders must already exist. Include the file extension when copying files. Returns a JSON string with source_path, destination_path, and type.",
+			schema: z.object({
+				intent: intentSchema,
+				source_path: z.string().describe("The exact vault-relative path of the file or folder to copy. Use list to discover paths. Use forward slashes."),
+				destination_path: z.string().describe("The exact vault-relative destination path for the copy. It must not already exist, and its parent folder must already exist. Include the file extension for files."),
+			}),
+		}
+	);
+}
+
+export function createActiveFileTool(app: App) {
+	return tool(
+		({ include_metadata: includeMetadata = false }: ActiveFileToolInput): string => {
+			const activeFile = app.workspace.getActiveFile();
+			if (!activeFile) {
+				return JSON.stringify({ active_file: null, message: "No active file." });
+			}
+
+			const result = {
+				active_file: {
+					path: activeFile.path,
+					name: activeFile.name,
+					basename: activeFile.basename,
+					extension: activeFile.extension,
+					wikilink: buildSemanticWikilink(app, activeFile.path),
+					stat: activeFile.stat,
+					metadata: includeMetadata ? app.metadataCache.getFileCache(activeFile) : undefined,
+				},
+			};
+
+			return JSON.stringify(result);
+		},
+		{
+			name: "active_file",
+			description: "Return the currently active Obsidian file from the workspace as JSON. Use this when the user refers to 'this note', 'the current file', or similar context without naming a path. Optionally include Obsidian cached metadata for the active file. This tool does not read file contents; use view afterwards if content is needed.",
+			schema: z.object({
+				intent: intentSchema,
+				include_metadata: z.boolean().optional().default(false).describe("Whether to include Obsidian cached metadata such as links, tags, headings, and frontmatter for the active file. Defaults to false."),
+			}),
+		}
+	);
+}
+
+export function createBacklinksTool(app: App) {
+	return tool(
+		({ linkToMarkdownfile }: BacklinksToolInput): string => {
+			const targetFile = resolveMarkdownFile(app, linkToMarkdownfile);
+			if (!targetFile) {
+				return getFileNotFoundMessage(app, linkToMarkdownfile);
+			}
+
+			const backlinks: BacklinkResult[] = Object.entries(app.metadataCache.resolvedLinks)
+				.filter(([, links]) => (links[targetFile.path] ?? 0) > 0)
+				.map(([sourcePath, links]) => {
+					const sourceFile = app.vault.getAbstractFileByPath(sourcePath);
+					return {
+						source_path: sourcePath,
+						wikilink: buildSemanticWikilink(app, sourcePath),
+						link_count: links[targetFile.path] ?? 0,
+						references: sourceFile instanceof TFile ? getBacklinkReferences(app, sourceFile, targetFile) : [],
+					};
+				});
+
+			return JSON.stringify({
+				target_path: targetFile.path,
+				wikilink: buildSemanticWikilink(app, targetFile.path),
+				backlinks,
+			});
+		},
+		{
+			name: "backlinks",
+			description: "Return notes that link to a target Markdown note using Obsidian MetadataCache resolved links. Accepts a note path or wikilink, resolves it like view, and returns JSON with the target path, target wikilink, backlink source paths, source wikilinks, link counts, and per-reference link text with 1-based line numbers when cached metadata is available. Use this to answer what references a note, find related notes, detect context around a note, or audit inbound links without scanning full note contents.",
+			schema: z.object({
+				intent: intentSchema,
+				linkToMarkdownfile: z.string().describe("The target Markdown note path or wikilink whose backlinks should be returned. Use list to discover paths when needed."),
+			}),
+		}
+	);
+}
+
 export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress) {
-	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app)];
+	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app), createCreateFolderTool(app), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app)];
 }
 
 function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {
@@ -386,6 +576,19 @@ function stringifyRenameMetadata(sourcePath: string, destinationPath: string, ty
 		type,
 	};
 	return JSON.stringify(result);
+}
+
+function getBacklinkReferences(app: App, sourceFile: TFile, targetFile: TFile): BacklinkReference[] {
+	const sourceCache = app.metadataCache.getFileCache(sourceFile);
+	const references = sourceCache?.links ?? [];
+	return references
+		.filter((reference) => app.metadataCache.getFirstLinkpathDest(reference.link, sourceFile.path)?.path === targetFile.path)
+		.map((reference) => ({
+			link: reference.link,
+			original: reference.original,
+			display_text: reference.displayText,
+			line: reference.position.start.line + 1,
+		}));
 }
 
 function countOccurrences(content: string, searchValue: string): number {
