@@ -1500,6 +1500,7 @@ export class PorygonView extends ItemView {
 				ollamaThinking: this.plugin.settings.ollamaThinking,
 				personalPrompt: this.plugin.settings.personalPrompt.trim(),
 				messages: this.buildAgentMessages(porygonMessage),
+				skills: this.plugin.skills,
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();

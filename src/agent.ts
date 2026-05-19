@@ -5,6 +5,7 @@ import { App } from "obsidian";
 import { createAgent } from "langchain";
 import defaultSystemPrompt from "../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "./rag";
+import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
 import { createAgentTools } from "./tools";
 
 export type AgentChatRole = "user" | "porygon" | "file";
@@ -23,6 +24,7 @@ export interface LocalAgentOptions {
 	ollamaThinking: boolean;
 	personalPrompt: string;
 	messages: AgentChatMessage[];
+	skills: SkillsService;
 }
 
 export interface AgentToolCallIntent {
@@ -54,6 +56,8 @@ const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 words) for a conversation that starts with this message. Return ONLY the title, nothing else. Use the user's initial message as context when generating your response.";
 
 export async function streamLocalAgent(options: LocalAgentOptions, handlers: LocalAgentStreamHandlers = {}): Promise<LocalAgentResponse> {
+	const skillsPrompt = buildAvailableSkillsPrompt(options.skills.getSkills());
+	const systemPrompt = [DEFAULT_SYSTEM_PROMPT, skillsPrompt].filter(Boolean).join("\n\n");
 	const agent = createAgent({
 		model: new ChatOllama({
 			baseUrl: options.ollamaHost,
@@ -61,8 +65,8 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			think: options.ollamaThinking,
 			maxRetries: 0,
 		}),
-		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress),
-		systemPrompt: DEFAULT_SYSTEM_PROMPT,
+		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills),
+		systemPrompt,
 	});
 
 	const stream = await agent.stream(
