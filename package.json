@@ -1,6 +1,6 @@
 {
 	"name": "porygon",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Turn your notes into a conversation",
 	"main": "main.js",
 	"type": "module",
