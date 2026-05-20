@@ -909,7 +909,7 @@ export class PorygonView extends ItemView {
 			}))
 			.forEach((result) => results.push(result));
 
-		this.getAllVaultFolders()
+		this.plugin.app.vault.getAllFolders()
 			.filter((folder) => !unavailablePaths.has(folder.path))
 			.map((folder): MentionSearchResult => ({
 				type: "folder",
@@ -939,23 +939,6 @@ export class PorygonView extends ItemView {
 		}
 
 		return `${result.type === "folder" ? "1" : "2"}-${result.path}`;
-	}
-
-	private getAllVaultFolders(): TFolder[] {
-		const folders: TFolder[] = [];
-		const collectFolders = (folder: TFolder) => {
-			folder.children.forEach((child) => {
-				if (!(child instanceof TFolder)) {
-					return;
-				}
-
-				folders.push(child);
-				collectFolders(child);
-			});
-		};
-
-		collectFolders(this.plugin.app.vault.getRoot());
-		return folders;
 	}
 
 	private getDirectMarkdownFiles(folder: TFolder): TFile[] {

@@ -1,9 +1,9 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { getFrontMatterInfo } from "obsidian";
 import { RagBuildChunksInput, RagMarkdownChunk } from "./types";
 
 const DEFAULT_CHUNK_SIZE = 1200;
 const DEFAULT_CHUNK_OVERLAP = 200;
-const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/;
 
 export async function buildMarkdownChunks(input: RagBuildChunksInput): Promise<RagMarkdownChunk[]> {
 	const splitter = new RecursiveCharacterTextSplitter({
@@ -32,5 +32,6 @@ export function createChunkId(path: string, chunkIndex: number): string {
 }
 
 export function stripFrontmatter(content: string): string {
-	return content.replace(FRONTMATTER_PATTERN, "");
+	const info = getFrontMatterInfo(content);
+	return info.exists ? content.slice(info.contentStart) : content;
 }

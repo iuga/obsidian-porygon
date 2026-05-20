@@ -1,5 +1,6 @@
-import { App, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
+import { App, debounce, Debouncer, getFrontMatterInfo, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
 import summarizerSkill from "../skills/summarizer.md";
+import explainerSkill from "../skills/explainer.md";
 
 export interface AgentSkill {
 	name: string;
@@ -21,14 +22,17 @@ const SKILLS_FOLDER = "porygon/skills";
 const REFRESH_DEBOUNCE_MS = 400;
 const BUNDLED_SKILLS: BundledSkill[] = [
 	{ filename: "summarizer.md", content: summarizerSkill },
+	{ filename: "explainer.md", content: explainerSkill},
 ];
 
 export class SkillsService {
 	private skills: AgentSkill[] = [];
 	private initialized = false;
-	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	private debouncedRefresh: Debouncer<[], void>;
 
-	constructor(private readonly app: App) {}
+	constructor(private readonly app: App) {
+		this.debouncedRefresh = debounce(() => { void this.refresh(); }, REFRESH_DEBOUNCE_MS, true);
+	}
 
 	async initialize(): Promise<void> {
 		await ensureBundledSkills(this.app);
@@ -59,13 +63,7 @@ export class SkillsService {
 			return;
 		}
 
-		if (this.refreshTimer !== null) {
-			clearTimeout(this.refreshTimer);
-		}
-		this.refreshTimer = setTimeout(() => {
-			this.refreshTimer = null;
-			void this.refresh();
-		}, REFRESH_DEBOUNCE_MS);
+		this.debouncedRefresh();
 	}
 
 	async loadSkillContent(location: string): Promise<string> {
@@ -168,14 +166,14 @@ async function discoverSkills(app: App): Promise<AgentSkill[]> {
 
 function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
 	const normalizedContent = content.replace(/^\uFEFF/, "");
-	const match = normalizedContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-	if (!match) {
+	const info = getFrontMatterInfo(normalizedContent);
+	if (!info.exists) {
 		return { frontmatter: {}, content: normalizedContent };
 	}
 
 	let frontmatter: Record<string, unknown> = {};
 	try {
-		const parsed: unknown = parseYaml(match[1] ?? "");
+		const parsed: unknown = parseYaml(info.frontmatter);
 		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
 			frontmatter = parsed as Record<string, unknown>;
 		}
@@ -185,7 +183,7 @@ function parseSkillMarkdown(content: string): ParsedSkillMarkdown {
 
 	return {
 		frontmatter,
-		content: normalizedContent.slice(match[0].length),
+		content: normalizedContent.slice(info.contentStart),
 	};
 }
 
