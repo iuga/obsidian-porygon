@@ -1,5 +1,6 @@
 import { AIMessageChunk, BaseMessageLike } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
+import { MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
 import { App } from "obsidian";
 import { createAgent } from "langchain";
@@ -7,6 +8,16 @@ import defaultSystemPrompt from "../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
 import { createAgentTools } from "./tools";
+
+const agentCheckpointer = new MemorySaver();
+
+export async function clearAgentMemory(sessionId: string): Promise<void> {
+	try {
+		await agentCheckpointer.deleteThread(sessionId);
+	} catch (error) {
+		console.error("Unable to clear Porygon agent memory", sessionId, error);
+	}
+}
 
 export type AgentChatRole = "user" | "porygon" | "file";
 
@@ -25,6 +36,7 @@ export interface LocalAgentOptions {
 	personalPrompt: string;
 	messages: AgentChatMessage[];
 	skills: SkillsService;
+	sessionId: string;
 }
 
 export interface AgentToolCallIntent {
@@ -57,7 +69,7 @@ const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 word
 
 export async function streamLocalAgent(options: LocalAgentOptions, handlers: LocalAgentStreamHandlers = {}): Promise<LocalAgentResponse> {
 	const skillsPrompt = buildAvailableSkillsPrompt(options.skills.getSkills());
-	const systemPrompt = [DEFAULT_SYSTEM_PROMPT, skillsPrompt].filter(Boolean).join("\n\n");
+	const systemPrompt = [DEFAULT_SYSTEM_PROMPT, skillsPrompt, options.personalPrompt].filter(Boolean).join("\n\n");
 	const agent = createAgent({
 		model: new ChatOllama({
 			baseUrl: options.ollamaHost,
@@ -67,12 +79,12 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		}),
 		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills),
 		systemPrompt,
+		checkpointer: agentCheckpointer,
 	});
 
-	const stream = await agent.stream(
-		{ messages: [toSystemMessage(options.personalPrompt), ...options.messages.map(toLangChainMessage)] },
-		{ streamMode: "messages" },
-	);
+	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
+	const turnMessages = options.messages.map(toLangChainMessage);
+	const stream = await agent.stream({ messages: turnMessages }, config);
 
 	let content = "";
 	let thinking = "";

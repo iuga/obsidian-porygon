@@ -1,5 +1,5 @@
-import { ItemView, MarkdownRenderer, Modal, setIcon, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AgentToolCallIntent, generateSessionTitle, streamLocalAgent } from "./agent";
+import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { AgentChatMessage, AgentToolCallIntent, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
 import PorygonPlugin from "./main";
 import { OllamaHttpClient, OllamaModel } from "./ollama-client";
 import { ONBOARDING_DEFAULTS } from "./settings";
@@ -58,16 +58,7 @@ interface SessionSummary {
 interface SessionMetadata {
 	id?: string;
 	title?: string;
-}
-
-interface SavedMention {
-	kind: MentionType;
-	path: string;
-	files: string[];
-}
-
-interface MessageMetadata {
-	mentions?: SavedMention[] | MentionedItem[];
+	mentions?: string[];
 }
 
 interface ParsedSession {
@@ -100,8 +91,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const PORYGON_SESSIONS_FOLDER = "porygon/sessions";
-const PORYGON_METADATA_OPEN = "%%porygon:metadata";
-const PORYGON_METADATA_CLOSE = "%%";
+const PORYGON_FRONTMATTER_DELIMITER = "---";
 const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? - / for commands - @ for mentions";
 const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
 	"What shall we make clearer today?",
@@ -140,6 +130,7 @@ export class PorygonView extends ItemView {
 	private selectedSessionIndex = 0;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
+	private isSessionMemoryPrimed = false;
 	private isStreaming = false;
 	private isCheckingHealth = false;
 	private isHealthy = true;
@@ -727,8 +718,12 @@ export class PorygonView extends ItemView {
 	}
 
 	private startNewChat(): void {
+		if (this.currentSessionId) {
+			void clearAgentMemory(this.currentSessionId);
+		}
 		this.currentSessionId = null;
 		this.currentSessionTitle = "";
+		this.isSessionMemoryPrimed = false;
 		this.messages = [];
 		this.selectedMentions = [];
 		this.renderMentionTags();
@@ -914,7 +909,7 @@ export class PorygonView extends ItemView {
 			}))
 			.forEach((result) => results.push(result));
 
-		this.getAllVaultFolders()
+		this.plugin.app.vault.getAllFolders()
 			.filter((folder) => !unavailablePaths.has(folder.path))
 			.map((folder): MentionSearchResult => ({
 				type: "folder",
@@ -944,23 +939,6 @@ export class PorygonView extends ItemView {
 		}
 
 		return `${result.type === "folder" ? "1" : "2"}-${result.path}`;
-	}
-
-	private getAllVaultFolders(): TFolder[] {
-		const folders: TFolder[] = [];
-		const collectFolders = (folder: TFolder) => {
-			folder.children.forEach((child) => {
-				if (!(child instanceof TFolder)) {
-					return;
-				}
-
-				folders.push(child);
-				collectFolders(child);
-			});
-		};
-
-		collectFolders(this.plugin.app.vault.getRoot());
-		return folders;
 	}
 
 	private getDirectMarkdownFiles(folder: TFolder): TFile[] {
@@ -1483,6 +1461,14 @@ export class PorygonView extends ItemView {
 		this.updateSendButtonState();
 		this.renderMessages();
 
+		if (!this.currentSessionId) {
+			this.currentSessionId = crypto.randomUUID();
+		}
+		const isFirstSendForSession = !this.isSessionMemoryPrimed;
+		const agentMessages = isFirstSendForSession
+			? this.buildAgentMessages(porygonMessage)
+			: this.buildAgentMessagesForLatestTurn(porygonMessage);
+
 		try {
 			let thinkingStartedAt: number | null = null;
 			let hasStartedStreamingContent = false;
@@ -1499,8 +1485,9 @@ export class PorygonView extends ItemView {
 				ollamaChatModel: this.plugin.settings.ollamaChatModel,
 				ollamaThinking: this.plugin.settings.ollamaThinking,
 				personalPrompt: this.plugin.settings.personalPrompt.trim(),
-				messages: this.buildAgentMessages(porygonMessage),
+				messages: agentMessages,
 				skills: this.plugin.skills,
+				sessionId: this.currentSessionId,
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();
@@ -1522,6 +1509,8 @@ export class PorygonView extends ItemView {
 					this.renderMessages();
 				},
 			});
+
+			this.isSessionMemoryPrimed = true;
 
 			if (porygonMessage.thinking && thinkingStartedAt !== null) {
 				porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
@@ -1570,6 +1559,18 @@ export class PorygonView extends ItemView {
 		}));
 	}
 
+	private buildAgentMessagesForLatestTurn(excludedMessage: ChatMessage): AgentChatMessage[] {
+		const allMessages = this.buildAgentMessages(excludedMessage);
+		let lastUserIndex = -1;
+		for (let index = allMessages.length - 1; index >= 0; index -= 1) {
+			if (allMessages[index]?.role === "user") {
+				lastUserIndex = index;
+				break;
+			}
+		}
+		return lastUserIndex === -1 ? allMessages : allMessages.slice(lastUserIndex);
+	}
+
 	private buildAgentMessageContent(message: ChatMessage): string {
 		return message.content;
 	}
@@ -1587,17 +1588,63 @@ export class PorygonView extends ItemView {
 		}));
 	}
 
+	private async rehydrateSessionMessages(messages: ChatMessage[], savedMentionPaths: string[]): Promise<ChatMessage[]> {
+		const resolvedMentions = this.resolveSavedMentions(savedMentionPaths);
+		if (resolvedMentions.length === 0) {
+			return messages;
+		}
+
+		const firstUserMessage = messages.find((message): message is ChatMessage & { role: "user" } => message.role === "user");
+		if (firstUserMessage) {
+			firstUserMessage.mentions = resolvedMentions;
+		}
+
+		const fileMessages = await this.createFileContextMessages(resolvedMentions);
+		const firstUserIndex = firstUserMessage ? messages.indexOf(firstUserMessage) : -1;
+		if (firstUserIndex === -1) {
+			return [...fileMessages, ...messages];
+		}
+
+		return [
+			...messages.slice(0, firstUserIndex + 1),
+			...fileMessages,
+			...messages.slice(firstUserIndex + 1),
+		];
+	}
+
+	private resolveSavedMentions(paths: string[]): MentionedItem[] {
+		return paths.flatMap((path): MentionedItem[] => {
+			const resolved = this.resolveSavedMention(path);
+			return resolved ? [resolved] : [];
+		});
+	}
+
+	private resolveSavedMention(path: string): MentionedItem | null {
+		const target = this.plugin.app.vault.getAbstractFileByPath(path);
+		if (target instanceof TFolder) {
+			const files = this.getDirectMarkdownFiles(target).map((file) => this.toMentionedFile(file));
+			return { type: "folder", path, basename: target.name, files };
+		}
+
+		if (target instanceof TFile) {
+			const files = [this.toMentionedFile(target)];
+			return { type: "note", path, basename: target.basename, files };
+		}
+
+		console.error("Unable to resolve Porygon mention", path);
+		return null;
+	}
+
 	private async saveSession(): Promise<void> {
 		const visibleMessages = this.messages.filter((message): message is ChatMessage & { role: "user" | "porygon" } => message.role === "user" || message.role === "porygon");
-		const firstMessage = visibleMessages[0];
-		if (!firstMessage) {
+		if (visibleMessages.length === 0) {
 			this.messages.push({ role: "warning", content: "No session to save." });
 			this.renderMessages();
 			return;
 		}
 
 		try {
-			const sessionId = this.currentSessionId ?? this.getSessionTimestamp(firstMessage);
+			const sessionId = this.currentSessionId ?? crypto.randomUUID();
 			const title = await this.getTitleForSave(visibleMessages);
 			this.currentSessionId = sessionId;
 			this.currentSessionTitle = title;
@@ -1617,15 +1664,35 @@ export class PorygonView extends ItemView {
 		}
 	}
 
-	private getSessionTimestamp(firstMessage: ChatMessage): string {
-		const timestampSource = firstMessage.createdAt ?? new Date().toISOString();
-		return timestampSource.replace(/[:.]/g, "-");
+	private formatSessionForSave(sessionId: string, title: string, messages: Array<ChatMessage & { role: "user" | "porygon" }>): string {
+		const frontmatterData: SessionMetadata = { id: sessionId, title };
+		const mentions = this.collectSessionMentions(messages);
+		if (mentions.length > 0) {
+			frontmatterData.mentions = mentions;
+		}
+		const frontmatter = stringifyYaml(frontmatterData).trimEnd();
+		const messageBlocks = messages.map((message) => this.formatMessageForSave(message));
+		return [`${PORYGON_FRONTMATTER_DELIMITER}\n${frontmatter}\n${PORYGON_FRONTMATTER_DELIMITER}`, ...messageBlocks].join("\n\n");
 	}
 
-	private formatSessionForSave(sessionId: string, title: string, messages: Array<ChatMessage & { role: "user" | "porygon" }>): string {
-		const sessionMetadata = this.formatMetadataBlock({ id: sessionId, title });
-		const messageBlocks = messages.map((message) => this.formatMessageForSave(message));
-		return [sessionMetadata, ...messageBlocks].join("\n\n");
+	private collectSessionMentions(messages: ChatMessage[]): string[] {
+		const seen = new Set<string>();
+		const paths: string[] = [];
+		for (const message of messages) {
+			if (!message.mentions) {
+				continue;
+			}
+
+			for (const mention of message.mentions) {
+				if (seen.has(mention.path)) {
+					continue;
+				}
+
+				seen.add(mention.path);
+				paths.push(mention.path);
+			}
+		}
+		return paths;
 	}
 
 	private async getTitleForSave(messages: ChatMessage[]): Promise<string> {
@@ -1670,24 +1737,7 @@ export class PorygonView extends ItemView {
 
 	private formatMessageForSave(message: ChatMessage & { role: "user" | "porygon" }): string {
 		const label = message.role === "user" ? "User" : "Porygon";
-		const messageBlock = `${label}: \n${message.content}`;
-		if (message.role !== "user" || !message.mentions || message.mentions.length === 0) {
-			return messageBlock;
-		}
-
-		return `${this.formatMetadataBlock({ mentions: message.mentions.map((mention) => this.toSavedMention(mention)) })}\n${messageBlock}`;
-	}
-
-	private toSavedMention(mention: MentionedItem): SavedMention {
-		return {
-			kind: mention.type,
-			path: mention.path,
-			files: mention.files.map((file) => file.path),
-		};
-	}
-
-	private formatMetadataBlock(metadata: Record<string, unknown>): string {
-		return `${PORYGON_METADATA_OPEN}\n${JSON.stringify(metadata, null, 2)}\n${PORYGON_METADATA_CLOSE}`;
+		return `${label}: \n${message.content}`;
 	}
 
 	private async selectSession(session: SessionSummary): Promise<void> {
@@ -1711,9 +1761,14 @@ export class PorygonView extends ItemView {
 		try {
 			const content = await this.plugin.app.vault.cachedRead(file);
 			const parsed = this.parseSession(content);
-			this.currentSessionId = parsed.metadata.id ?? file.basename;
+			const nextSessionId = parsed.metadata.id ?? file.basename;
+			if (this.currentSessionId && this.currentSessionId !== nextSessionId) {
+				void clearAgentMemory(this.currentSessionId);
+			}
+			this.currentSessionId = nextSessionId;
 			this.currentSessionTitle = parsed.metadata.title ?? "";
-			this.messages = await this.rehydrateSessionMessages(parsed.messages);
+			this.isSessionMemoryPrimed = false;
+			this.messages = await this.rehydrateSessionMessages(parsed.messages, parsed.metadata.mentions ?? []);
 			this.selectedMentions = [];
 			if (this.composerInputEl) {
 				this.composerInputEl.value = "";
@@ -1730,30 +1785,64 @@ export class PorygonView extends ItemView {
 		}
 	}
 
-	private async rehydrateSessionMessages(messages: ChatMessage[]): Promise<ChatMessage[]> {
-		const rehydratedMessages: ChatMessage[] = [];
-		for (const message of messages) {
-			rehydratedMessages.push(message);
-			if (message.role !== "user" || !message.mentions || message.mentions.length === 0) {
-				continue;
-			}
-
-			try {
-				rehydratedMessages.push(...await this.createFileContextMessages(message.mentions));
-			} catch (error) {
-				console.error("Unable to load Porygon session mentions", message.mentions, error);
-			}
-		}
-		return rehydratedMessages;
+	private parseSession(content: string): ParsedSession {
+		const { metadata, body } = this.extractSessionMetadata(content);
+		const messages = this.parseSessionMessages(body);
+		return { metadata, messages };
 	}
 
-	private parseSession(content: string): ParsedSession {
-		const lines = content.split("\n");
-		const messages: ChatMessage[] = [];
+	private extractSessionMetadata(content: string): { metadata: SessionMetadata; body: string } {
+		const info = getFrontMatterInfo(content);
+		if (!info.exists) {
+			return { metadata: {}, body: content };
+		}
+
+		const body = content.slice(info.contentStart).replace(/^\n+/, "");
+		return { metadata: this.parseSessionFrontmatter(info.frontmatter), body };
+	}
+
+	private parseSessionFrontmatter(yaml: string): SessionMetadata {
+		try {
+			const parsed: unknown = parseYaml(yaml);
+			return this.toSessionMetadata(parsed);
+		} catch (error) {
+			console.error("Unable to parse Porygon session frontmatter", error);
+			return {};
+		}
+	}
+
+	private toSessionMetadata(value: unknown): SessionMetadata {
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
+			return {};
+		}
+
+		const record = value as Record<string, unknown>;
 		const metadata: SessionMetadata = {};
-		let pendingMetadata: MessageMetadata | SessionMetadata | null = null;
+		if (typeof record.id === "string") {
+			metadata.id = record.id;
+		}
+		if (typeof record.title === "string") {
+			metadata.title = record.title;
+		}
+		const mentions = this.toSavedMentions(record.mentions);
+		if (mentions.length > 0) {
+			metadata.mentions = mentions;
+		}
+		return metadata;
+	}
+
+	private toSavedMentions(value: unknown): string[] {
+		if (!Array.isArray(value)) {
+			return [];
+		}
+
+		return value.flatMap((entry): string[] => (typeof entry === "string" && entry.length > 0 ? [entry] : []));
+	}
+
+	private parseSessionMessages(body: string): ChatMessage[] {
+		const lines = body.split("\n");
+		const messages: ChatMessage[] = [];
 		let currentMessage: ChatMessage | null = null;
-		let hasSeenMessage = false;
 
 		const flushCurrentMessage = () => {
 			if (!currentMessage) {
@@ -1765,54 +1854,28 @@ export class PorygonView extends ItemView {
 			currentMessage = null;
 		};
 
-		const createMessage = (role: "user" | "porygon", initialContent: string): ChatMessage => {
-			hasSeenMessage = true;
-			const message: ChatMessage = { role, content: initialContent, mentions: role === "user" ? this.getMetadataMentions(pendingMetadata) : undefined };
-			pendingMetadata = null;
-			return message;
-		};
-
-		for (let index = 0; index < lines.length; index += 1) {
-			const line = lines[index] ?? "";
-			if (line === PORYGON_METADATA_OPEN) {
-				flushCurrentMessage();
-				const metadataLines: string[] = [];
-				index += 1;
-				while (index < lines.length && lines[index] !== PORYGON_METADATA_CLOSE) {
-					metadataLines.push(lines[index] ?? "");
-					index += 1;
-				}
-				const parsedMetadata = this.parseMetadataBlock(metadataLines.join("\n"));
-				if (!hasSeenMessage && !Array.isArray(parsedMetadata.mentions)) {
-					metadata.id = typeof parsedMetadata.id === "string" ? parsedMetadata.id : metadata.id;
-					metadata.title = typeof parsedMetadata.title === "string" ? parsedMetadata.title : metadata.title;
-				} else {
-					pendingMetadata = parsedMetadata;
-				}
-				continue;
-			}
-
+		for (const line of lines) {
 			if (line === "User:" || line === "User: ") {
 				flushCurrentMessage();
-				currentMessage = createMessage("user", "");
+				currentMessage = { role: "user", content: "" };
 				continue;
 			}
 
 			if (line.startsWith("User: ") && !currentMessage) {
 				flushCurrentMessage();
-				currentMessage = createMessage("user", line.slice("User: ".length));
+				currentMessage = { role: "user", content: line.slice("User: ".length) };
 				continue;
 			}
 
 			if (line === "Porygon:" || line === "Porygon: ") {
 				flushCurrentMessage();
-				currentMessage = createMessage("porygon", "");
+				currentMessage = { role: "porygon", content: "" };
 				continue;
 			}
 
 			if (line.startsWith("Porygon: ") && !currentMessage) {
 				flushCurrentMessage();
-				currentMessage = createMessage("porygon", line.slice("Porygon: ".length));
+				currentMessage = { role: "porygon", content: line.slice("Porygon: ".length) };
 				continue;
 			}
 
@@ -1823,77 +1886,7 @@ export class PorygonView extends ItemView {
 		}
 
 		flushCurrentMessage();
-		return { metadata, messages };
-	}
-
-	private parseMetadataBlock(content: string): Record<string, unknown> {
-		try {
-			const metadata: unknown = JSON.parse(content);
-			if (this.isRecord(metadata)) {
-				return metadata;
-			}
-		} catch (error) {
-			console.error("Unable to parse Porygon session metadata", error);
-		}
-
-		return {};
-	}
-
-	private getMetadataMentions(metadata: MessageMetadata | SessionMetadata | null): MentionedItem[] | undefined {
-		if (!this.isRecord(metadata) || !Array.isArray(metadata.mentions)) {
-			return undefined;
-		}
-
-		const mentions = metadata.mentions.flatMap((mention): MentionedItem[] => {
-			const parsedMention = this.parseSavedMention(mention) ?? this.parseLegacyMentionedItem(mention);
-			return parsedMention ? [parsedMention] : [];
-		});
-		return mentions.length > 0 ? mentions : undefined;
-	}
-
-	private parseSavedMention(value: unknown): MentionedItem | null {
-		if (!this.isRecord(value) || !this.isMentionType(value.kind) || typeof value.path !== "string" || !Array.isArray(value.files)) {
-			return null;
-		}
-
-		const files = value.files.flatMap((filePath): MentionedFile[] => {
-			if (typeof filePath !== "string") {
-				console.error("Unable to load Porygon mention file metadata", filePath);
-				return [];
-			}
-
-			return [{ path: filePath, basename: this.getBasenameFromPath(filePath) }];
-		});
-		return { type: value.kind, path: value.path, basename: this.getBasenameFromPath(value.path), files };
-	}
-
-	private parseLegacyMentionedItem(value: unknown): MentionedItem | null {
-		if (!this.isRecord(value) || !this.isMentionType(value.type) || typeof value.path !== "string" || typeof value.basename !== "string" || !Array.isArray(value.files)) {
-			console.error("Unable to load Porygon mention metadata", value);
-			return null;
-		}
-
-		const files = value.files.flatMap((file): MentionedFile[] => {
-			if (!this.isRecord(file) || typeof file.path !== "string" || typeof file.basename !== "string") {
-				console.error("Unable to load Porygon mention file metadata", file);
-				return [];
-			}
-
-			return [{ path: file.path, basename: file.basename }];
-		});
-		return { type: value.type, path: value.path, basename: value.basename, files };
-	}
-
-	private isMentionType(value: unknown): value is MentionType {
-		return value === "note" || value === "folder" || value === "active-note";
-	}
-
-	private isRecord(value: unknown): value is Record<string, unknown> {
-		return typeof value === "object" && value !== null && !Array.isArray(value);
-	}
-
-	private getBasenameFromPath(path: string): string {
-		return (path.split("/").last() ?? path).replace(/\.md$/i, "");
+		return messages;
 	}
 
 	private async ensureFolderExists(path: string): Promise<void> {
