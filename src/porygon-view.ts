@@ -1,5 +1,5 @@
-import { ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AgentToolCallIntent, generateSessionTitle, streamLocalAgent } from "./agent";
+import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { AgentChatMessage, AgentToolCallIntent, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
 import PorygonPlugin from "./main";
 import { OllamaHttpClient, OllamaModel } from "./ollama-client";
 import { ONBOARDING_DEFAULTS } from "./settings";
@@ -718,6 +718,9 @@ export class PorygonView extends ItemView {
 	}
 
 	private startNewChat(): void {
+		if (this.currentSessionId) {
+			void clearAgentMemory(this.currentSessionId);
+		}
 		this.currentSessionId = null;
 		this.currentSessionTitle = "";
 		this.isSessionMemoryPrimed = false;
@@ -1482,7 +1485,6 @@ export class PorygonView extends ItemView {
 		const agentMessages = isFirstSendForSession
 			? this.buildAgentMessages(porygonMessage)
 			: this.buildAgentMessagesForLatestTurn(porygonMessage);
-		this.isSessionMemoryPrimed = true;
 
 		try {
 			let thinkingStartedAt: number | null = null;
@@ -1524,6 +1526,8 @@ export class PorygonView extends ItemView {
 					this.renderMessages();
 				},
 			});
+
+			this.isSessionMemoryPrimed = true;
 
 			if (porygonMessage.thinking && thinkingStartedAt !== null) {
 				porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
@@ -1636,12 +1640,12 @@ export class PorygonView extends ItemView {
 		const target = this.plugin.app.vault.getAbstractFileByPath(path);
 		if (target instanceof TFolder) {
 			const files = this.getDirectMarkdownFiles(target).map((file) => this.toMentionedFile(file));
-			return { type: "folder", path, basename: path.split("/").last() ?? path, files };
+			return { type: "folder", path, basename: target.name, files };
 		}
 
 		if (target instanceof TFile) {
 			const files = [this.toMentionedFile(target)];
-			return { type: "note", path, basename: path.split("/").last() ?? path, files };
+			return { type: "note", path, basename: target.basename, files };
 		}
 
 		console.error("Unable to resolve Porygon mention", path);
@@ -1774,7 +1778,11 @@ export class PorygonView extends ItemView {
 		try {
 			const content = await this.plugin.app.vault.cachedRead(file);
 			const parsed = this.parseSession(content);
-			this.currentSessionId = parsed.metadata.id ?? file.basename;
+			const nextSessionId = parsed.metadata.id ?? file.basename;
+			if (this.currentSessionId && this.currentSessionId !== nextSessionId) {
+				void clearAgentMemory(this.currentSessionId);
+			}
+			this.currentSessionId = nextSessionId;
 			this.currentSessionTitle = parsed.metadata.title ?? "";
 			this.isSessionMemoryPrimed = false;
 			this.messages = await this.rehydrateSessionMessages(parsed.messages, parsed.metadata.mentions ?? []);
@@ -1801,19 +1809,13 @@ export class PorygonView extends ItemView {
 	}
 
 	private extractSessionMetadata(content: string): { metadata: SessionMetadata; body: string } {
-		const lines = content.split("\n");
-		if (lines[0] !== PORYGON_FRONTMATTER_DELIMITER) {
+		const info = getFrontMatterInfo(content);
+		if (!info.exists) {
 			return { metadata: {}, body: content };
 		}
 
-		const closingIndex = lines.findIndex((line, index) => index > 0 && line === PORYGON_FRONTMATTER_DELIMITER);
-		if (closingIndex === -1) {
-			return { metadata: {}, body: content };
-		}
-
-		const yaml = lines.slice(1, closingIndex).join("\n");
-		const body = lines.slice(closingIndex + 1).join("\n").replace(/^\n+/, "");
-		return { metadata: this.parseSessionFrontmatter(yaml), body };
+		const body = content.slice(info.contentStart).replace(/^\n+/, "");
+		return { metadata: this.parseSessionFrontmatter(info.frontmatter), body };
 	}
 
 	private parseSessionFrontmatter(yaml: string): SessionMetadata {

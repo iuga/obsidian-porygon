@@ -11,6 +11,14 @@ import { createAgentTools } from "./tools";
 
 const agentCheckpointer = new MemorySaver();
 
+export async function clearAgentMemory(sessionId: string): Promise<void> {
+	try {
+		await agentCheckpointer.deleteThread(sessionId);
+	} catch (error) {
+		console.error("Unable to clear Porygon agent memory", sessionId, error);
+	}
+}
+
 export type AgentChatRole = "user" | "porygon" | "file";
 
 export interface AgentChatMessage {
@@ -74,12 +82,9 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		checkpointer: agentCheckpointer,
 	});
 
-	const config = { configurable: { thread_id: options.sessionId } };
+	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
 	const turnMessages = options.messages.map(toLangChainMessage);
-	const stream = await agent.stream(
-		{ messages: turnMessages },
-		{ ...config, streamMode: "messages" },
-	);
+	const stream = await agent.stream({ messages: turnMessages }, config);
 
 	let content = "";
 	let thinking = "";
