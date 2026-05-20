@@ -1,3 +1,7 @@
+## 0.5.0: Persistent agent memory and Obsidian-native session metadata
+
+Porygon now uses a LangGraph `MemorySaver` checkpointer keyed by a per-session UUID so the agent remembers prior turns within a session without resending full history each call. Saved sessions store their metadata as Obsidian-native YAML frontmatter (`id`, `title`, and a flat `mentions:` list of vault paths) instead of a custom comment block, making it queryable through the Properties panel, Dataview, and Bases; on load, mentioned notes and folders are auto-resolved from their paths and re-injected as file context. **Breaking change:** session files saved before 0.5.0 (custom `%%porygon:metadata%%` blocks and timestamp-based filenames) are no longer readable — start fresh or migrate manually.
+
 ## 0.4.0: Agent skills loaded on demand
 Porygon introduces a skills system that lets the agent extend its capabilities through Markdown files with YAML frontmatter (`name`, `description`) stored under `porygon/skills/` in the vault. Bundled skills shipped with the plugin are copied into the vault on first launch, parsed once at startup via a new `SkillsService` (after `onLayoutReady` so the vault is fully scanned) and cached, refreshing only when vault create/modify/delete/rename events touch the skills folder. The list is injected into the system prompt as an `<available_skills>` block, and a new `load_skill` agent tool reads the full skill body (without frontmatter) on demand using the exact location advertised in that block.
 
