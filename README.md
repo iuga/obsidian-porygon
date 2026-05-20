@@ -9,11 +9,16 @@ Turn your Obsidian vault into a local-first AI workspace.
 
 Chat with your notes and use Ollama-powered agent tools to search, edit, and interact with your vault while keeping everything private, local, and free.
 
+## Philosophy
+
+Porygon is a simple and practical workspace for thinking, learning, and daily work. The goal is to build tools that are minimalistic, lightweight, and genuinely useful. AI is part of the experience, but not the center of it. It should help when needed, stay out of the way when not, and feel naturally integrated into the workflow instead of becoming the workflow itself.
+
 ## Features
 
 - **AI-powered chat:** Talk with local Ollama models directly from Obsidian with streaming Markdown responses.
 - **Agent tools:** Let the assistant search, read, create, and edit notes in your vault through built-in tools.
 - **Semantic search:** Find relevant notes by meaning instead of exact words, making it easier to discover related content across your vault.
+- **Skills:** Teach the assistant reusable procedures with simple Markdown files stored in your vault, loaded on demand.
 - **Save and resume sessions:** Continue previous conversations at any time without losing context.
 
 ### Agent tools
