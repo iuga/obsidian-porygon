@@ -1509,7 +1509,7 @@ export class PorygonView extends ItemView {
 			if (target instanceof HTMLElement && this.askPopoverEl.contains(target)) {
 				event.preventDefault();
 				event.stopPropagation();
-				this.resolveAskUser("User ignored the question/approval, please continue");
+				this.resolveAskUser("User ignored the question/approval");
 			}
 		};
 		window.addEventListener("keydown", this.askKeydownHandler, true);
