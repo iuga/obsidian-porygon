@@ -1,13 +1,15 @@
 import { AIMessageChunk, BaseMessageLike } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
-import { MemorySaver } from "@langchain/langgraph";
+import { Command, MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
 import { App } from "obsidian";
 import { createAgent } from "langchain";
 import defaultSystemPrompt from "../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
-import { createAgentTools } from "./tools";
+import { AskUserInterruptPayload, createAgentTools } from "./tools";
+
+export type { AskUserInterruptPayload };
 
 const agentCheckpointer = new MemorySaver();
 
@@ -55,6 +57,7 @@ export interface LocalAgentStreamHandlers {
 	onContentDelta?: (delta: string) => void;
 	onThinkingDelta?: (delta: string) => void;
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
+	onAskUser?: (payload: AskUserInterruptPayload) => Promise<string> | string;
 }
 
 export interface SessionTitleAgentOptions {
@@ -84,7 +87,6 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 
 	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
 	const turnMessages = options.messages.map(toLangChainMessage);
-	const stream = await agent.stream({ messages: turnMessages }, config);
 
 	let content = "";
 	let thinking = "";
@@ -92,34 +94,72 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const toolCallChunks = new Map<number, ToolCallChunk>();
 	const emittedToolCallIds = new Set<string>();
 
-	for await (const [message, metadata] of stream) {
-		if (!AIMessageChunk.isInstance(message)) {
-			continue;
+	let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
+	for (let safety = 0; safety < 32; safety += 1) {
+		const stream = await agent.stream(nextInput, config);
+		for await (const chunk of stream) {
+			if (!Array.isArray(chunk)) {
+				continue;
+			}
+			const [message, metadata] = chunk as [unknown, unknown];
+			if (!AIMessageChunk.isInstance(message)) {
+				continue;
+			}
+
+			if ((metadata as { langgraph_node?: string }).langgraph_node !== MODEL_NODE_NAME) {
+				continue;
+			}
+
+			for (const toolIntent of getToolIntents(message, toolCallChunks, emittedToolCallIds)) {
+				toolIntents.push(toolIntent);
+				handlers.onToolIntent?.(toolIntent);
+			}
+
+			const reasoningDelta = getReasoningDelta(message);
+			if (reasoningDelta) {
+				thinking += reasoningDelta;
+				handlers.onThinkingDelta?.(reasoningDelta);
+			}
+
+			const contentDelta = typeof message.content === "string" ? message.content : "";
+			if (contentDelta) {
+				content += contentDelta;
+				handlers.onContentDelta?.(contentDelta);
+			}
 		}
 
-		if ((metadata as { langgraph_node?: string }).langgraph_node !== MODEL_NODE_NAME) {
-			continue;
+		const askPayload = await getPendingAskUserPayload(agent, config);
+		if (!askPayload) {
+			break;
 		}
 
-		for (const toolIntent of getToolIntents(message, toolCallChunks, emittedToolCallIds)) {
-			toolIntents.push(toolIntent);
-			handlers.onToolIntent?.(toolIntent);
+		if (!handlers.onAskUser) {
+			throw new Error("Agent requested user input but no askUser handler was provided.");
 		}
 
-		const reasoningDelta = getReasoningDelta(message);
-		if (reasoningDelta) {
-			thinking += reasoningDelta;
-			handlers.onThinkingDelta?.(reasoningDelta);
-		}
-
-		const contentDelta = typeof message.content === "string" ? message.content : "";
-		if (contentDelta) {
-			content += contentDelta;
-			handlers.onContentDelta?.(contentDelta);
-		}
+		const reply = await handlers.onAskUser(askPayload);
+		nextInput = new Command({ resume: reply });
 	}
 
 	return { content, thinking, toolIntents };
+}
+
+interface AgentLike {
+	getState: (config: unknown) => Promise<{ tasks?: Array<{ interrupts?: Array<{ value?: unknown }> }> }>;
+}
+
+async function getPendingAskUserPayload(agent: AgentLike, config: unknown): Promise<AskUserInterruptPayload | null> {
+	const state = await agent.getState(config);
+	const interruptValue = state.tasks?.[0]?.interrupts?.[0]?.value;
+	return isAskUserPayload(interruptValue) ? interruptValue : null;
+}
+
+function isAskUserPayload(value: unknown): value is AskUserInterruptPayload {
+	if (!isRecord(value)) {
+		return false;
+	}
+	const { question, options } = value as { question?: unknown; options?: unknown };
+	return typeof question === "string" && Array.isArray(options) && options.every((option) => typeof option === "string");
 }
 
 export async function generateSessionTitle(options: SessionTitleAgentOptions): Promise<string> {

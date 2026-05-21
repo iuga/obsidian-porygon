@@ -1,8 +1,14 @@
 import { tool } from "@langchain/core/tools";
+import { interrupt } from "@langchain/langgraph";
 import { App, normalizePath, prepareSimpleSearch, TFile, TFolder } from "obsidian";
 import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { SkillsService } from "./skills";
 import { z } from "zod";
+
+export interface AskUserInterruptPayload {
+	question: string;
+	options: string[];
+}
 
 const DEFAULT_VIEW_LIMIT = 2000;
 const SEMANTIC_SNIPPET_MAX_CHARS = 320;
@@ -501,8 +507,35 @@ export function createLoadSkillTool(skills: SkillsService) {
 	);
 }
 
+export const askUserTool = tool(
+	async ({ question, options }: { question: string; options: string[] }): Promise<string> => {
+		const payload: AskUserInterruptPayload = { question, options };
+		const reply = interrupt<AskUserInterruptPayload, unknown>(payload);
+		if (typeof reply === "string") {
+			return reply;
+		}
+		if (reply === null || reply === undefined) {
+			return "";
+		}
+		try {
+			return JSON.stringify(reply);
+		} catch {
+			return "";
+		}
+	},
+	{
+		name: "ask_user",
+		description: "Ask the user a single question with 2 to 4 short option labels. Pauses the agent until the user picks one of the options or types a free-form reply. Returns the user's answer as a string (either the chosen option's exact label or the free-form text). Use this only when a real choice from the user is required to proceed.",
+		schema: z.object({
+			intent: intentSchema,
+			question: z.string().min(1).describe("The question to show the user."),
+			options: z.array(z.string().min(1)).min(2).max(4).describe("Between 2 and 4 short option labels for the user to choose from."),
+		}),
+	}
+);
+
 export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress, skills: SkillsService) {
-	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app), createCreateFolderTool(app), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills)];
+	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app), createCreateFolderTool(app), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills), askUserTool];
 }
 
 function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {

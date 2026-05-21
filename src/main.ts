@@ -1,5 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
+
+AsyncLocalStorageProviderSingleton.initializeGlobalInstance(
+	new AsyncLocalStorage()
+);
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS, LegacyPorygonPluginSettings } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
