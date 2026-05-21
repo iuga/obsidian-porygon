@@ -91,6 +91,16 @@ export class PorygonSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		new Setting(containerEl)
+			.setName("Yolo mode")
+			.setDesc("Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.yolo)
+				.onChange(async (value) => {
+					this.plugin.settings.yolo = value;
+					await this.plugin.saveSettings();
+				}));
+
 		this.renderSectionHeading(containerEl, "Semantic search", "Configure local semantic indexing.");
 		this.statusSetting = new Setting(containerEl).setName("Index status");
 		this.subscribeToIndexProgress();

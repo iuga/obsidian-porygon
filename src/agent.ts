@@ -1,13 +1,15 @@
-import { AIMessageChunk, BaseMessageLike } from "@langchain/core/messages";
+import { AIMessageChunk, BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
-import { MemorySaver } from "@langchain/langgraph";
+import { Command, MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
 import { App } from "obsidian";
 import { createAgent } from "langchain";
 import defaultSystemPrompt from "../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
-import { createAgentTools } from "./tools";
+import { AskUserInterruptPayload, createAgentTools } from "./tools";
+
+export type { AskUserInterruptPayload };
 
 const agentCheckpointer = new MemorySaver();
 
@@ -30,6 +32,7 @@ export interface LocalAgentOptions {
 	app: App;
 	semanticSearch: RagSemanticSearchService;
 	getIndexProgress: () => RagIndexProgress;
+	getYolo: () => boolean;
 	ollamaHost: string;
 	ollamaChatModel: string;
 	ollamaThinking: boolean;
@@ -55,6 +58,7 @@ export interface LocalAgentStreamHandlers {
 	onContentDelta?: (delta: string) => void;
 	onThinkingDelta?: (delta: string) => void;
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
+	onAskUser?: (payload: AskUserInterruptPayload) => Promise<string> | string;
 }
 
 export interface SessionTitleAgentOptions {
@@ -64,6 +68,7 @@ export interface SessionTitleAgentOptions {
 }
 
 const MODEL_NODE_NAME = "model_request";
+const MAX_INTERRUPT_RESUME_CYCLES = 16;
 const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 words) for a conversation that starts with this message. Return ONLY the title, nothing else. Use the user's initial message as context when generating your response.";
 
@@ -77,14 +82,13 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			think: options.ollamaThinking,
 			maxRetries: 0,
 		}),
-		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills),
+		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo),
 		systemPrompt,
 		checkpointer: agentCheckpointer,
 	});
 
 	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
 	const turnMessages = options.messages.map(toLangChainMessage);
-	const stream = await agent.stream({ messages: turnMessages }, config);
 
 	let content = "";
 	let thinking = "";
@@ -92,34 +96,99 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const toolCallChunks = new Map<number, ToolCallChunk>();
 	const emittedToolCallIds = new Set<string>();
 
-	for await (const [message, metadata] of stream) {
-		if (!AIMessageChunk.isInstance(message)) {
-			continue;
+	let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
+	for (let cycle = 0; cycle < MAX_INTERRUPT_RESUME_CYCLES; cycle += 1) {
+		const stream = await agent.stream(nextInput, config);
+		for await (const chunk of stream) {
+			if (!Array.isArray(chunk)) {
+				continue;
+			}
+			const [message, metadata] = chunk as [BaseMessage, { langgraph_node?: string }];
+			if (!AIMessageChunk.isInstance(message)) {
+				continue;
+			}
+
+			if (metadata.langgraph_node !== MODEL_NODE_NAME) {
+				continue;
+			}
+
+			for (const toolIntent of getToolIntents(message, toolCallChunks, emittedToolCallIds)) {
+				toolIntents.push(toolIntent);
+				handlers.onToolIntent?.(toolIntent);
+			}
+
+			const reasoningDelta = getReasoningDelta(message);
+			if (reasoningDelta) {
+				thinking += reasoningDelta;
+				handlers.onThinkingDelta?.(reasoningDelta);
+			}
+
+			const contentDelta = typeof message.content === "string" ? message.content : "";
+			if (contentDelta) {
+				content += contentDelta;
+				handlers.onContentDelta?.(contentDelta);
+			}
 		}
 
-		if ((metadata as { langgraph_node?: string }).langgraph_node !== MODEL_NODE_NAME) {
-			continue;
+		const askPayloads = await getPendingAskUserPayloads(agent, config);
+		if (askPayloads.length === 0) {
+			return { content, thinking, toolIntents };
 		}
 
-		for (const toolIntent of getToolIntents(message, toolCallChunks, emittedToolCallIds)) {
-			toolIntents.push(toolIntent);
-			handlers.onToolIntent?.(toolIntent);
+		if (!handlers.onAskUser) {
+			throw new Error("Agent requested user input but no askUser handler was provided.");
 		}
 
-		const reasoningDelta = getReasoningDelta(message);
-		if (reasoningDelta) {
-			thinking += reasoningDelta;
-			handlers.onThinkingDelta?.(reasoningDelta);
+		// Resume each pending interrupt sequentially with the user's reply.
+		// LangGraph stores the resume map keyed by interrupt id; we collect
+		// them all so multiple interrupts in one turn don't get dropped.
+		const resumeMap: Record<string, string> = {};
+		for (const { id, payload } of askPayloads) {
+			resumeMap[id] = await handlers.onAskUser(payload);
 		}
-
-		const contentDelta = typeof message.content === "string" ? message.content : "";
-		if (contentDelta) {
-			content += contentDelta;
-			handlers.onContentDelta?.(contentDelta);
-		}
+		nextInput = new Command({ resume: resumeMap });
 	}
 
-	return { content, thinking, toolIntents };
+	throw new Error(`Agent exceeded ${MAX_INTERRUPT_RESUME_CYCLES} interrupt/resume cycles in a single turn.`);
+}
+
+interface AgentLike {
+	getState: (config: unknown) => Promise<{ tasks?: Array<{ interrupts?: Array<{ id?: string; value?: unknown }> }> }>;
+}
+
+interface PendingAskUser {
+	id: string;
+	payload: AskUserInterruptPayload;
+}
+
+async function getPendingAskUserPayloads(agent: AgentLike, config: unknown): Promise<PendingAskUser[]> {
+	const state = await agent.getState(config);
+	const pending: PendingAskUser[] = [];
+	for (const task of state.tasks ?? []) {
+		for (const interruptEntry of task.interrupts ?? []) {
+			const payload = normalizeAskUserPayload(interruptEntry.value);
+			if (payload && typeof interruptEntry.id === "string") {
+				pending.push({ id: interruptEntry.id, payload });
+			}
+		}
+	}
+	return pending;
+}
+
+function normalizeAskUserPayload(value: unknown): AskUserInterruptPayload | null {
+	if (!isRecord(value)) {
+		return null;
+	}
+	const { question, options } = value as { question?: unknown; options?: unknown };
+	if (typeof question !== "string" || !Array.isArray(options)) {
+		return null;
+	}
+	const stringOptions = options.filter((option): option is string => typeof option === "string");
+	if (stringOptions.length < 2) {
+		return null;
+	}
+	// Defensive cap: ignore extra options beyond the first 4 instead of failing.
+	return { question, options: stringOptions.slice(0, 4) };
 }
 
 export async function generateSessionTitle(options: SessionTitleAgentOptions): Promise<string> {

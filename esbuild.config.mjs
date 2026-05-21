@@ -31,7 +31,11 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		...builtinModules],
+		...builtinModules,
+		// Also mark the `node:` prefixed builtins external; required so
+		// `import { AsyncLocalStorage } from "node:async_hooks"` resolves to
+		// the runtime module inside Obsidian's Electron renderer.
+		...builtinModules.map((m) => `node:${m}`)],
 	format: "cjs",
 	target: "es2018",
 	loader: {

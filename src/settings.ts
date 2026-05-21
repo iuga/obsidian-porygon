@@ -6,13 +6,9 @@ export interface PorygonPluginSettings {
 	ollamaEmbeddingModel: string;
 	ollamaThinking: boolean;
 	showToolUsage: boolean;
+	yolo: boolean;
 	ragIgnoredPaths: string;
 	personalPrompt: string;
-}
-
-export interface LegacyPorygonPluginSettings extends Partial<PorygonPluginSettings> {
-	chatSystemPrompt?: string;
-	ragDatabasePath?: string;
 }
 
 export const DEFAULT_PERSONAL_PROMPT = defaultPersonalPrompt.trim();
@@ -23,6 +19,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	ollamaEmbeddingModel: "",
 	ollamaThinking: false,
 	showToolUsage: false,
+	yolo: false,
 	ragIgnoredPaths: "",
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 };
@@ -33,6 +30,7 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	ollamaEmbeddingModel: "nomic-embed-text",
 	ollamaThinking: false,
 	showToolUsage: false,
+	yolo: false,
 	ragIgnoredPaths: "",
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 };

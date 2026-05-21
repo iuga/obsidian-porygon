@@ -1,5 +1,5 @@
 import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AgentToolCallIntent, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
+import { AgentChatMessage, AgentToolCallIntent, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
 import PorygonPlugin from "./main";
 import { OllamaHttpClient, OllamaModel } from "./ollama-client";
 import { ONBOARDING_DEFAULTS } from "./settings";
@@ -128,6 +128,9 @@ export class PorygonView extends ItemView {
 	private sessionResults: SessionSummary[] = [];
 	private allSessionSummaries: SessionSummary[] = [];
 	private selectedSessionIndex = 0;
+	private askPopoverEl: HTMLElement | null = null;
+	private askKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+	private askResolve: ((reply: string) => void) | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
 	private isSessionMemoryPrimed = false;
@@ -162,6 +165,7 @@ export class PorygonView extends ItemView {
 	}
 
 	onClose(): Promise<void> {
+		this.closeAskUserPopover(true);
 		this.contentEl.empty();
 		return Promise.resolve();
 	}
@@ -730,6 +734,7 @@ export class PorygonView extends ItemView {
 		this.closeMentionPopover();
 		this.closeSlashCommandPopover();
 		this.closeSessionPopover();
+		this.closeAskUserPopover(true);
 		this.updateSendButtonState();
 		this.renderMessages();
 		this.composerInputEl?.focus();
@@ -1389,6 +1394,152 @@ export class PorygonView extends ItemView {
 		this.selectedSessionIndex = 0;
 	}
 
+	private handleAskUser(payload: AskUserInterruptPayload): Promise<string> {
+		return new Promise((resolve) => {
+			this.askResolve = resolve;
+			if (!this.composerEl) {
+				resolve("");
+				return;
+			}
+
+			this.renderAskUserPopover(this.composerEl, payload);
+		});
+	}
+
+	private renderAskUserPopover(composerEl: HTMLElement, payload: AskUserInterruptPayload): void {
+		this.closeAskUserPopover(false);
+		this.closeMentionPopover();
+		this.closeSlashCommandPopover();
+		this.closeSessionPopover();
+
+		const popover = composerEl.createDiv({ cls: "porygon-ask-popover" });
+		this.askPopoverEl = popover;
+		const panel = popover.createDiv({ cls: "porygon-ask-panel" });
+		panel.createDiv({ cls: "porygon-ask-question", text: payload.question });
+
+		const optionsEl = panel.createDiv({ cls: "porygon-ask-options" });
+		const optionButtons: HTMLButtonElement[] = [];
+		let selectedIndex = 0;
+		const setSelected = (next: number) => {
+			selectedIndex = (next + optionButtons.length) % optionButtons.length;
+			optionButtons.forEach((btn, i) => btn.toggleClass("is-selected", i === selectedIndex));
+		};
+		payload.options.forEach((option, index) => {
+			const button = optionsEl.createEl("button", {
+				cls: "porygon-ask-option",
+				attr: { type: "button", title: option, "aria-label": option },
+			});
+			button.createSpan({ cls: "porygon-ask-option-index", text: String(index + 1) });
+			button.createSpan({ cls: "porygon-ask-option-label", text: option });
+			button.addEventListener("mouseenter", () => setSelected(index));
+			button.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				this.resolveAskUser(option);
+			});
+			optionButtons.push(button);
+		});
+		setSelected(0);
+
+		const inputRow = panel.createDiv({ cls: "porygon-ask-input-row" });
+		const inputIcon = inputRow.createDiv({ cls: "porygon-ask-input-icon" });
+		setIcon(inputIcon, "pencil");
+		const input = inputRow.createEl("input", {
+			cls: "porygon-ask-input",
+			attr: { type: "text", placeholder: "Something else..." },
+		});
+		const submitButton = inputRow.createEl("button", {
+			cls: "porygon-send-button is-healthy",
+			attr: { type: "button", title: "Send reply", "aria-label": "Send reply" },
+		});
+		setIcon(submitButton, "send-horizontal");
+
+		const submit = () => {
+			const value = input.value.trim();
+			if (!value) {
+				return;
+			}
+			this.resolveAskUser(value);
+		};
+
+		submitButton.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			submit();
+		});
+
+		input.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" && !event.shiftKey) {
+				event.preventDefault();
+				if (input.value.trim()) {
+					submit();
+				} else {
+					const selected = payload.options[selectedIndex];
+					if (selected) {
+						this.resolveAskUser(selected);
+					}
+				}
+				return;
+			}
+
+			if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !input.value) {
+				event.preventDefault();
+				setSelected(selectedIndex + (event.key === "ArrowDown" ? 1 : -1));
+				return;
+			}
+
+			if (event.key >= "1" && event.key <= "9" && !input.value) {
+				const numeric = Number(event.key);
+				if (numeric <= payload.options.length) {
+					event.preventDefault();
+					const option = payload.options[numeric - 1];
+					if (option) {
+						this.resolveAskUser(option);
+					}
+				}
+			}
+		});
+
+		this.askKeydownHandler = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || !this.askPopoverEl) {
+				return;
+			}
+
+			const target = event.target;
+			if (target instanceof HTMLElement && this.askPopoverEl.contains(target)) {
+				event.preventDefault();
+				event.stopPropagation();
+				this.resolveAskUser("User ignored the question/approval");
+			}
+		};
+		window.addEventListener("keydown", this.askKeydownHandler, true);
+		input.focus();
+	}
+
+	private resolveAskUser(reply: string): void {
+		const resolve = this.askResolve;
+		this.askResolve = null;
+		this.closeAskUserPopover(false);
+		resolve?.(reply);
+		this.composerInputEl?.focus();
+	}
+
+	private closeAskUserPopover(resolveEmpty: boolean): void {
+		if (this.askKeydownHandler) {
+			window.removeEventListener("keydown", this.askKeydownHandler, true);
+			this.askKeydownHandler = null;
+		}
+
+		this.askPopoverEl?.remove();
+		this.askPopoverEl = null;
+
+		if (resolveEmpty && this.askResolve) {
+			const resolve = this.askResolve;
+			this.askResolve = null;
+			resolve("");
+		}
+	}
+
 	private getUnavailableMentionPaths(): Set<string> {
 		const paths = new Set(this.selectedMentions.map((mention) => mention.path));
 		this.messages.forEach((message) => {
@@ -1481,6 +1632,7 @@ export class PorygonView extends ItemView {
 				app: this.plugin.app,
 				semanticSearch: this.plugin.ragSemanticSearch,
 				getIndexProgress: () => this.plugin.ragIndexer.getProgress(),
+				getYolo: () => this.plugin.settings.yolo,
 				ollamaHost: this.getOllamaBaseUrl(),
 				ollamaChatModel: this.plugin.settings.ollamaChatModel,
 				ollamaThinking: this.plugin.settings.ollamaThinking,
@@ -1508,6 +1660,7 @@ export class PorygonView extends ItemView {
 					porygonMessage.isThinkingCollapsed = false;
 					this.renderMessages();
 				},
+				onAskUser: (payload) => this.handleAskUser(payload),
 			});
 
 			this.isSessionMemoryPrimed = true;
