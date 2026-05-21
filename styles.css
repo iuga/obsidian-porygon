@@ -612,7 +612,17 @@
 
 .porygon-ask-option:hover,
 .porygon-ask-option.is-selected {
-	background: var(--background-modifier-border) !important;
+	background: var(--background-modifier-hover) !important;
+}
+
+.porygon-ask-option.is-selected {
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent);
+}
+
+.porygon-ask-option.is-selected .porygon-ask-option-index {
+	background: var(--background-primary);
+	color: var(--text-normal);
 }
 
 .porygon-ask-option-index {

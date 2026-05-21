@@ -1,5 +1,5 @@
 import { tool } from "@langchain/core/tools";
-import { interrupt } from "@langchain/langgraph";
+import { interrupt, isGraphBubbleUp } from "@langchain/langgraph";
 import { App, normalizePath, prepareSimpleSearch, TFile, TFolder } from "obsidian";
 import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { SkillsService } from "./skills";
@@ -8,6 +8,40 @@ import { z } from "zod";
 export interface AskUserInterruptPayload {
 	question: string;
 	options: string[];
+}
+
+export type ApprovalDecision =
+	| { kind: "approve" }
+	| { kind: "deny" }
+	| { kind: "deny_with_feedback"; feedback: string };
+
+const APPROVE_LABEL = "Approve";
+const DENY_LABEL = "Deny";
+
+function requestApproval(question: string, getYolo: () => boolean): ApprovalDecision {
+	if (getYolo()) {
+		return { kind: "approve" };
+	}
+	const payload: AskUserInterruptPayload = {
+		question,
+		options: [APPROVE_LABEL, DENY_LABEL],
+	};
+	const reply = interrupt<AskUserInterruptPayload, unknown>(payload);
+	const text = typeof reply === "string" ? reply.trim() : "";
+	if (text === APPROVE_LABEL) {
+		return { kind: "approve" };
+	}
+	if (text === DENY_LABEL || text === "") {
+		return { kind: "deny" };
+	}
+	return { kind: "deny_with_feedback", feedback: text };
+}
+
+function toToolErrorMessage(error: unknown): string {
+	if (isGraphBubbleUp(error)) {
+		throw error;
+	}
+	return error instanceof Error ? error.message : String(error);
 }
 
 const DEFAULT_VIEW_LIMIT = 2000;
@@ -119,16 +153,30 @@ export function createListTool(app: App) {
 			const regex = trimmedFilter ? new RegExp(trimmedFilter) : null;
 			const notes = app.vault.getMarkdownFiles()
 				.filter((file) => !regex || regex.test(file.basename) || regex.test(file.name) || regex.test(file.path))
-				.map((file) => file.path);
+				.map((file) => ({ path: file.path, type: "file" as const }));
+			const folders: { path: string; type: "folder" }[] = [];
+			const root = app.vault.getRoot();
+			const walk = (folder: TFolder) => {
+				folder.children.forEach((child) => {
+					if (child instanceof TFolder) {
+						const path = child.path;
+						if (!regex || regex.test(child.name) || regex.test(path)) {
+							folders.push({ path, type: "folder" });
+						}
+						walk(child);
+					}
+				});
+			};
+			walk(root);
 
-			return JSON.stringify(notes);
+			return JSON.stringify([...folders, ...notes]);
 		},
 		{
 			name: "list",
-			description: "Lists markdown note paths. If filter is provided, only returns notes whose filename or path matches the regex filter. Returns a JSON string array. Use it to find notes or discover paths for the view and edit tools. You can also use it to fix typos in links by listing notes with a regex that matches part of the path.",
+			description: "Lists vault entries (both markdown notes and folders). If filter is provided, only returns entries whose name or path matches the regex filter. Returns a JSON string array of objects with `path` and `type` (\"file\" or \"folder\"). Use it to find notes or folders and discover paths for view, edit, rename, copy, and create_folder tools.",
 			schema: z.object({
 				intent: intentSchema,
-				filter: z.string().optional().default("").describe("Optional regex used to filter note filenames or paths."),
+				filter: z.string().optional().default("").describe("Optional regex used to filter entry names or paths."),
 			}),
 		}
 	);
@@ -176,7 +224,7 @@ export function createViewTool(app: App) {
 	);
 }
 
-export function createEditTool(app: App) {
+export function createEditTool(app: App, getYolo: () => boolean) {
 	return tool(
 		async ({ file_path: filePath, old_string: oldString, new_string: newString, replace_all: replaceAll = false }: { file_path: string; old_string: string; new_string: string; replace_all?: boolean }): Promise<string> => {
 			const filename = normalizeMarkdownPath(filePath);
@@ -186,6 +234,14 @@ export function createEditTool(app: App) {
 				if (!oldString) {
 					if (file) {
 						return `file already exists: ${filename}`;
+					}
+
+					const createDecision = requestApproval(`Create note \`${filename}\`?`, getYolo);
+					if (createDecision.kind === "deny") {
+						return `User denied creating note: ${filename}`;
+					}
+					if (createDecision.kind === "deny_with_feedback") {
+						return `User denied creating note: ${filename}. Feedback: ${createDecision.feedback}`;
 					}
 
 					await app.vault.create(filename, newString);
@@ -211,10 +267,19 @@ export function createEditTool(app: App) {
 					return "new content is the same as old content. No changes made.";
 				}
 
+				const action = newString === "" ? "Delete content from" : "Edit";
+				const editDecision = requestApproval(`${action} note \`${filename}\`?`, getYolo);
+				if (editDecision.kind === "deny") {
+					return `User denied editing note: ${filename}`;
+				}
+				if (editDecision.kind === "deny_with_feedback") {
+					return `User denied editing note: ${filename}. Feedback: ${editDecision.feedback}`;
+				}
+
 				await app.vault.modify(file, newContent);
 				return stringifyEditMetadata(oldContent, newContent);
 			} catch (error) {
-				return error instanceof Error ? error.message : String(error);
+				return toToolErrorMessage(error);
 			}
 		},
 		{
@@ -279,7 +344,7 @@ function truncateSnippet(text: string): string {
 	return `${text.slice(0, SEMANTIC_SNIPPET_MAX_CHARS)}…`;
 }
 
-export function createRenameTool(app: App) {
+export function createRenameTool(app: App, getYolo: () => boolean) {
 	return tool(
 		async ({ source_path: sourcePath, destination_path: destinationPath }: { source_path: string; destination_path: string }): Promise<string> => {
 			const source = normalizeVaultPath(sourcePath);
@@ -313,10 +378,19 @@ export function createRenameTool(app: App) {
 					return `destination parent folder does not exist: ${parentPath}`;
 				}
 
+				const kind = file instanceof TFolder ? "folder" : "file";
+				const decision = requestApproval(`Rename ${kind} \`${source}\` to \`${destination}\`?`, getYolo);
+				if (decision.kind === "deny") {
+					return `User denied renaming ${kind}: ${source} -> ${destination}`;
+				}
+				if (decision.kind === "deny_with_feedback") {
+					return `User denied renaming ${kind}: ${source} -> ${destination}. Feedback: ${decision.feedback}`;
+				}
+
 				await app.fileManager.renameFile(file, destination);
-				return stringifyRenameMetadata(source, destination, file instanceof TFolder ? "folder" : "file");
+				return stringifyRenameMetadata(source, destination, kind);
 			} catch (error) {
-				return error instanceof Error ? error.message : String(error);
+				return toToolErrorMessage(error);
 			}
 		},
 		{
@@ -331,7 +405,7 @@ export function createRenameTool(app: App) {
 	);
 }
 
-export function createCreateFolderTool(app: App) {
+export function createCreateFolderTool(app: App, getYolo: () => boolean) {
 	return tool(
 		async ({ folder_path: folderPath }: CreateFolderToolInput): Promise<string> => {
 			const folder = normalizeVaultPath(folderPath);
@@ -351,10 +425,18 @@ export function createCreateFolderTool(app: App) {
 					return `parent folder does not exist: ${parentPath}`;
 				}
 
+				const decision = requestApproval(`Create folder \`${folder}\`?`, getYolo);
+				if (decision.kind === "deny") {
+					return `User denied creating folder: ${folder}`;
+				}
+				if (decision.kind === "deny_with_feedback") {
+					return `User denied creating folder: ${folder}. Feedback: ${decision.feedback}`;
+				}
+
 				const createdFolder = await app.vault.createFolder(folder);
 				return JSON.stringify({ path: createdFolder.path, type: "folder" });
 			} catch (error) {
-				return error instanceof Error ? error.message : String(error);
+				return toToolErrorMessage(error);
 			}
 		},
 		{
@@ -405,7 +487,7 @@ export function createCopyTool(app: App) {
 				const copiedFile = await app.vault.copy(file, destination);
 				return stringifyRenameMetadata(source, copiedFile.path, copiedFile instanceof TFolder ? "folder" : "file");
 			} catch (error) {
-				return error instanceof Error ? error.message : String(error);
+				return toToolErrorMessage(error);
 			}
 		},
 		{
@@ -534,8 +616,8 @@ export const askUserTool = tool(
 	}
 );
 
-export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress, skills: SkillsService) {
-	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app), createRenameTool(app), createCreateFolderTool(app), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills), askUserTool];
+export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress, skills: SkillsService, getYolo: () => boolean) {
+	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app, getYolo), createRenameTool(app, getYolo), createCreateFolderTool(app, getYolo), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills), askUserTool];
 }
 
 function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {

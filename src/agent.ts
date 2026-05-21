@@ -32,6 +32,7 @@ export interface LocalAgentOptions {
 	app: App;
 	semanticSearch: RagSemanticSearchService;
 	getIndexProgress: () => RagIndexProgress;
+	getYolo: () => boolean;
 	ollamaHost: string;
 	ollamaChatModel: string;
 	ollamaThinking: boolean;
@@ -80,7 +81,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			think: options.ollamaThinking,
 			maxRetries: 0,
 		}),
-		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills),
+		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo),
 		systemPrompt,
 		checkpointer: agentCheckpointer,
 	});

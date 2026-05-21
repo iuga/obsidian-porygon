@@ -1629,6 +1629,7 @@ export class PorygonView extends ItemView {
 				app: this.plugin.app,
 				semanticSearch: this.plugin.ragSemanticSearch,
 				getIndexProgress: () => this.plugin.ragIndexer.getProgress(),
+				getYolo: () => this.plugin.settings.yolo,
 				ollamaHost: this.getOllamaBaseUrl(),
 				ollamaChatModel: this.plugin.settings.ollamaChatModel,
 				ollamaThinking: this.plugin.settings.ollamaThinking,

@@ -1,6 +1,10 @@
-## 0.6.0: Porygon can ask you before guessing
+## 0.6.0: Ask before guessing, approve before changing
 
-Porygon can now pause mid-task and ask you a focused question when it genuinely needs your input, instead of guessing or producing a half-relevant answer. A small popover appears in the chat composer with the question and 2–4 short options; you can click an option, pick one with number keys or arrow keys plus Enter, or type a free-form reply. Press Escape to dismiss and let Porygon continue on its own. Once you answer, Porygon resumes exactly where it left off.
+Porygon can now pause mid-task and ask you a focused question when it genuinely needs your input, instead of guessing or producing a half-relevant answer. A small popover appears in the chat composer with the question and 2–4 short options; you can click an option, pick one with number keys or arrow keys plus Enter, type a free-form reply, or press Escape to let Porygon continue on its own. Once you answer, Porygon resumes exactly where it left off.
+
+The same pause-and-ask flow also gates destructive vault actions: creating a folder, creating or editing a note, and renaming or moving files now prompt for **Approve** or **Deny**, and you can type a short free-form reason to deny with feedback so Porygon adjusts its next step. A new **YOLO mode** setting auto-approves these prompts when you want Porygon to move without interruptions, and the setting is read live so you can toggle it mid-conversation.
+
+The `list` tool now returns folders alongside notes, so Porygon can find and act on folders by name. The selected option in the prompt uses your theme's accent color for clear contrast on both light and dark themes.
 
 ## 0.5.0: Persistent agent memory and Obsidian-native session metadata
 

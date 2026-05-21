@@ -20,6 +20,7 @@ Porygon is a simple and practical workspace for thinking, learning, and daily wo
 - **Semantic search:** Find relevant notes by meaning instead of exact words, making it easier to discover related content across your vault.
 - **Skills:** Teach the assistant reusable procedures with simple Markdown files stored in your vault, loaded on demand.
 - **Ask before guessing:** Porygon can pause mid-task to ask you a focused question with a few options when it needs your input, then resume where it left off.
+- **Approve before changing:** Destructive vault actions (create folder, create or edit a note, rename or move files) prompt for approval, with the option to deny with a short free-form reason so Porygon adjusts its next step. Turn on **YOLO mode** in settings to auto-approve when you want to move fast.
 - **Save and resume sessions:** Continue previous conversations at any time without losing context.
 
 ### Agent tools
