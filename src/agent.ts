@@ -1,4 +1,4 @@
-import { AIMessageChunk, BaseMessageLike } from "@langchain/core/messages";
+import { AIMessageChunk, BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
@@ -68,6 +68,7 @@ export interface SessionTitleAgentOptions {
 }
 
 const MODEL_NODE_NAME = "model_request";
+const MAX_INTERRUPT_RESUME_CYCLES = 16;
 const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 words) for a conversation that starts with this message. Return ONLY the title, nothing else. Use the user's initial message as context when generating your response.";
 
@@ -96,18 +97,18 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const emittedToolCallIds = new Set<string>();
 
 	let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
-	for (let safety = 0; safety < 32; safety += 1) {
+	for (let cycle = 0; cycle < MAX_INTERRUPT_RESUME_CYCLES; cycle += 1) {
 		const stream = await agent.stream(nextInput, config);
 		for await (const chunk of stream) {
 			if (!Array.isArray(chunk)) {
 				continue;
 			}
-			const [message, metadata] = chunk as [unknown, unknown];
+			const [message, metadata] = chunk as [BaseMessage, { langgraph_node?: string }];
 			if (!AIMessageChunk.isInstance(message)) {
 				continue;
 			}
 
-			if ((metadata as { langgraph_node?: string }).langgraph_node !== MODEL_NODE_NAME) {
+			if (metadata.langgraph_node !== MODEL_NODE_NAME) {
 				continue;
 			}
 
@@ -129,38 +130,65 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			}
 		}
 
-		const askPayload = await getPendingAskUserPayload(agent, config);
-		if (!askPayload) {
-			break;
+		const askPayloads = await getPendingAskUserPayloads(agent, config);
+		if (askPayloads.length === 0) {
+			return { content, thinking, toolIntents };
 		}
 
 		if (!handlers.onAskUser) {
 			throw new Error("Agent requested user input but no askUser handler was provided.");
 		}
 
-		const reply = await handlers.onAskUser(askPayload);
-		nextInput = new Command({ resume: reply });
+		// Resume each pending interrupt sequentially with the user's reply.
+		// LangGraph stores the resume map keyed by interrupt id; we collect
+		// them all so multiple interrupts in one turn don't get dropped.
+		const resumeMap: Record<string, string> = {};
+		for (const { id, payload } of askPayloads) {
+			resumeMap[id] = await handlers.onAskUser(payload);
+		}
+		nextInput = new Command({ resume: resumeMap });
 	}
 
-	return { content, thinking, toolIntents };
+	throw new Error(`Agent exceeded ${MAX_INTERRUPT_RESUME_CYCLES} interrupt/resume cycles in a single turn.`);
 }
 
 interface AgentLike {
-	getState: (config: unknown) => Promise<{ tasks?: Array<{ interrupts?: Array<{ value?: unknown }> }> }>;
+	getState: (config: unknown) => Promise<{ tasks?: Array<{ interrupts?: Array<{ id?: string; value?: unknown }> }> }>;
 }
 
-async function getPendingAskUserPayload(agent: AgentLike, config: unknown): Promise<AskUserInterruptPayload | null> {
+interface PendingAskUser {
+	id: string;
+	payload: AskUserInterruptPayload;
+}
+
+async function getPendingAskUserPayloads(agent: AgentLike, config: unknown): Promise<PendingAskUser[]> {
 	const state = await agent.getState(config);
-	const interruptValue = state.tasks?.[0]?.interrupts?.[0]?.value;
-	return isAskUserPayload(interruptValue) ? interruptValue : null;
+	const pending: PendingAskUser[] = [];
+	for (const task of state.tasks ?? []) {
+		for (const interruptEntry of task.interrupts ?? []) {
+			const payload = normalizeAskUserPayload(interruptEntry.value);
+			if (payload && typeof interruptEntry.id === "string") {
+				pending.push({ id: interruptEntry.id, payload });
+			}
+		}
+	}
+	return pending;
 }
 
-function isAskUserPayload(value: unknown): value is AskUserInterruptPayload {
+function normalizeAskUserPayload(value: unknown): AskUserInterruptPayload | null {
 	if (!isRecord(value)) {
-		return false;
+		return null;
 	}
 	const { question, options } = value as { question?: unknown; options?: unknown };
-	return typeof question === "string" && Array.isArray(options) && options.every((option) => typeof option === "string");
+	if (typeof question !== "string" || !Array.isArray(options)) {
+		return null;
+	}
+	const stringOptions = options.filter((option): option is string => typeof option === "string");
+	if (stringOptions.length < 2) {
+		return null;
+	}
+	// Defensive cap: ignore extra options beyond the first 4 instead of failing.
+	return { question, options: stringOptions.slice(0, 4) };
 }
 
 export async function generateSessionTitle(options: SessionTitleAgentOptions): Promise<string> {

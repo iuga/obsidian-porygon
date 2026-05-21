@@ -165,6 +165,7 @@ export class PorygonView extends ItemView {
 	}
 
 	onClose(): Promise<void> {
+		this.closeAskUserPopover(true);
 		this.contentEl.empty();
 		return Promise.resolve();
 	}
@@ -1487,12 +1488,14 @@ export class PorygonView extends ItemView {
 				return;
 			}
 
-			const numeric = Number(event.key);
-			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= payload.options.length && !input.value) {
-				event.preventDefault();
-				const option = payload.options[numeric - 1];
-				if (option) {
-					this.resolveAskUser(option);
+			if (event.key >= "1" && event.key <= "9" && !input.value) {
+				const numeric = Number(event.key);
+				if (numeric <= payload.options.length) {
+					event.preventDefault();
+					const option = payload.options[numeric - 1];
+					if (option) {
+						this.resolveAskUser(option);
+					}
 				}
 			}
 		});
@@ -1506,7 +1509,7 @@ export class PorygonView extends ItemView {
 			if (target instanceof HTMLElement && this.askPopoverEl.contains(target)) {
 				event.preventDefault();
 				event.stopPropagation();
-				this.resolveAskUser("User ignored the question, please continue");
+				this.resolveAskUser("User ignored the question/approval, please continue");
 			}
 		};
 		window.addEventListener("keydown", this.askKeydownHandler, true);

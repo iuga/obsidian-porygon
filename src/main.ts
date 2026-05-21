@@ -2,12 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
-
-AsyncLocalStorageProviderSingleton.initializeGlobalInstance(
-	new AsyncLocalStorage()
-);
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
-import { PorygonPluginSettings, DEFAULT_SETTINGS, LegacyPorygonPluginSettings } from "./settings";
+import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
 import { SkillsService } from "./skills";
 
@@ -19,6 +15,12 @@ export default class PorygonPlugin extends Plugin {
 	private ragStore: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
+		// LangGraph's `interrupt()` resumes the right async context only when
+		// `AsyncLocalStorage` is wired into the singleton provider. We do it
+		// here (once, before any agent stream runs) instead of at module load
+		// to keep side effects out of import time.
+		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
+
 		await this.loadSettings();
 		this.skills = new SkillsService(this.app);
 		this.ragStore = new RagIndexedDbStore();
@@ -71,10 +73,8 @@ export default class PorygonPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const savedSettings = await this.loadData() as LegacyPorygonPluginSettings | null;
+		const savedSettings = await this.loadData() as Partial<PorygonPluginSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings);
-		delete (this.settings as LegacyPorygonPluginSettings).chatSystemPrompt;
-		delete (this.settings as LegacyPorygonPluginSettings).ragDatabasePath;
 	}
 
 	async saveSettings(): Promise<void> {

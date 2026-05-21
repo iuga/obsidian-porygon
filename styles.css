@@ -606,7 +606,6 @@
 	box-shadow: none !important;
 	background: transparent !important;
 	color: var(--text-normal);
-	text-align: right;
 	border-radius: var(--radius-m);
 }
 

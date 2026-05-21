@@ -6,7 +6,7 @@ description: Summarize a text note or markdown file into one of three formats (o
 # Note Summarizer
 
 Summarize plain text or markdown into one of three modes. 
-You can use the `askUser` tool for the prefered mode, otherwise, the default is **one-paragraph**.
+You can use the `askUser` tool for the preferred mode, otherwise, the default is **one-paragraph**.
 
 ## Modes
 

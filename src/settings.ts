@@ -11,11 +11,6 @@ export interface PorygonPluginSettings {
 	personalPrompt: string;
 }
 
-export interface LegacyPorygonPluginSettings extends Partial<PorygonPluginSettings> {
-	chatSystemPrompt?: string;
-	ragDatabasePath?: string;
-}
-
 export const DEFAULT_PERSONAL_PROMPT = defaultPersonalPrompt.trim();
 
 export const DEFAULT_SETTINGS: PorygonPluginSettings = {

@@ -92,8 +92,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("YOLO mode")
-			.setDesc("Auto-approve destructive tool actions (create folder, edit, rename) without asking. Leave off to be prompted before each change.")
+			.setName("Yolo mode")
+			.setDesc("Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.")
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.yolo)
 				.onChange(async (value) => {
