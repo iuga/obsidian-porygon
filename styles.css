@@ -431,13 +431,13 @@
 	position: absolute;
 	left: 20px;
 	right: 20px;
-	bottom: calc(100% - -2px);
+	bottom: 100%;
 	z-index: var(--layer-popover);
 	display: flex;
 	flex-direction: column;
 	padding: 0 var(--size-4-2);
 	border: 1px solid var(--background-modifier-border);
-	border-bottom: 1px solid var(--background-modifier-border);
+	border-bottom: 0;
 	border-radius: var(--radius-l) var(--radius-l) 0 0;
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 	background: var(--background-secondary-alt);
