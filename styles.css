@@ -1,3 +1,9 @@
+/*
+ * Specificity doubling (e.g. `.porygon-mention-tag.porygon-mention-tag`) is
+ * intentional: it raises selector specificity to override Obsidian's default
+ * button / input styles without resorting to `!important`. Do not "clean up".
+ */
+
 .porygon-main {
 	display: flex;
 	height: 100%;
@@ -68,14 +74,14 @@
 	margin-bottom: 0;
 }
 
-.porygon-message-stack .porygon-mention-tag {
-	border: 0 !important;
-	background: transparent !important;
+.porygon-message-stack .porygon-mention-tag.porygon-mention-tag {
+	border: 0;
+	background: transparent;
 	font-size: var(--font-ui-smaller);
 }
 
-.porygon-message-stack .porygon-mention-tag:hover {
-	background: var(--background-modifier-hover) !important;
+.porygon-message-stack .porygon-mention-tag.porygon-mention-tag:hover {
+	background: var(--background-modifier-hover);
 }
 
 .porygon-message-bubble {
@@ -220,12 +226,6 @@
 	word-break: break-word;
 }
 
-.porygon-tools-name {
-	margin-right: var(--size-2-2);
-	color: var(--text-normal);
-	font-weight: var(--font-medium);
-}
-
 .porygon-tools-intent {
 	color: var(--text-muted);
 }
@@ -280,22 +280,22 @@
 	margin-bottom: var(--size-4-3);
 }
 
-.porygon-mention-tag {
+.porygon-mention-tag.porygon-mention-tag {
 	display: inline-flex;
 	max-width: 100%;
 	height: 28px;
 	align-items: center;
 	gap: var(--size-2-1);
 	padding: 0 var(--size-2-2);
-	border: 1px solid var(--background-modifier-border) !important;
+	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-l);
-	box-shadow: none !important;
-	background: transparent !important;
+	box-shadow: none;
+	background: transparent;
 	color: var(--text-normal);
 }
 
-.porygon-mention-tag:hover {
-	background: var(--background-modifier-hover) !important;
+.porygon-mention-tag.porygon-mention-tag:hover {
+	background: var(--background-modifier-hover);
 }
 
 .porygon-mention-tag-icon,
@@ -389,30 +389,30 @@
 	justify-content: space-between;
 }
 
-.porygon-composer-button,
-.porygon-send-button {
+.porygon-composer-button.porygon-composer-button,
+.porygon-send-button.porygon-send-button {
 	display: flex;
 	width: 32px;
 	height: 32px;
 	align-items: center;
 	justify-content: center;
 	padding: 0;
-	border: 0 !important;
-	box-shadow: none !important;
-	background: transparent !important;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
 	color: var(--text-muted);
 }
 
-.porygon-composer-button:hover:not(:disabled),
-.porygon-send-button:hover:not(:disabled) {
-	border: 0 !important;
-	box-shadow: none !important;
-	background: var(--interactive-accent) !important;
+.porygon-composer-button.porygon-composer-button:hover:not(:disabled),
+.porygon-send-button.porygon-send-button:hover:not(:disabled) {
+	border: 0;
+	box-shadow: none;
+	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 }
 
-.porygon-send-button.is-unhealthy {
-	color: var(--color-red) !important;
+.porygon-send-button.porygon-send-button.is-unhealthy {
+	color: var(--color-red);
 	opacity: 1;
 }
 
@@ -483,9 +483,9 @@
 	overflow-y: auto;
 }
 
-.porygon-mention-result,
-.porygon-slash-result,
-.porygon-session-result {
+.porygon-mention-result.porygon-mention-result,
+.porygon-slash-result.porygon-slash-result,
+.porygon-session-result.porygon-session-result {
 	display: flex;
 	width: 100%;
 	min-height: 36px;
@@ -493,20 +493,20 @@
 	justify-content: flex-start;
 	gap: var(--size-2-2);
 	padding: var(--size-2-2);
-	border: 0 !important;
-	box-shadow: none !important;
-	background: transparent !important;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
 	color: var(--text-normal);
 	text-align: left;
 }
 
-.porygon-mention-result:hover,
-.porygon-mention-result.is-selected,
-.porygon-slash-result:hover,
-.porygon-slash-result.is-selected,
-.porygon-session-result:hover,
-.porygon-session-result.is-selected {
-	background: var(--background-modifier-hover) !important;
+.porygon-mention-result.porygon-mention-result:hover,
+.porygon-mention-result.porygon-mention-result.is-selected,
+.porygon-slash-result.porygon-slash-result:hover,
+.porygon-slash-result.porygon-slash-result.is-selected,
+.porygon-session-result.porygon-session-result:hover,
+.porygon-session-result.porygon-session-result.is-selected {
+	background: var(--background-modifier-hover);
 }
 
 .porygon-mention-result-icon,
@@ -572,14 +572,9 @@
 .porygon-mention-empty,
 .porygon-slash-empty,
 .porygon-session-empty {
+	padding: var(--size-2-2);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-}
-
-.porygon-mention-empty,
-.porygon-slash-empty,
-.porygon-session-empty {
-	padding: var(--size-2-2);
 }
 
 .porygon-ask-question {
@@ -595,27 +590,27 @@
 	gap: var(--size-2-1);
 }
 
-.porygon-ask-option {
+.porygon-ask-option.porygon-ask-option {
 	display: flex;
 	width: 100%;
 	min-height: 40px;
 	align-items: center;
 	gap: var(--size-4-2);
 	padding: var(--size-2-1) var(--size-2-2);
-	border: 0 !important;
-	box-shadow: none !important;
-	background: transparent !important;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
 	color: var(--text-normal);
 	border-radius: var(--radius-m);
 }
 
-.porygon-ask-option:hover,
-.porygon-ask-option.is-selected {
-	background: var(--background-modifier-hover) !important;
+.porygon-ask-option.porygon-ask-option:hover,
+.porygon-ask-option.porygon-ask-option.is-selected {
+	background: var(--background-modifier-hover);
 }
 
-.porygon-ask-option.is-selected {
-	background: var(--interactive-accent) !important;
+.porygon-ask-option.porygon-ask-option.is-selected {
+	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 }
 
@@ -672,23 +667,23 @@
 	height: 14px;
 }
 
-.porygon-ask-input {
+.porygon-ask-input.porygon-ask-input {
 	flex: 1;
 	min-width: 0;
-	border: 0 !important;
-	outline: none !important;
-	box-shadow: none !important;
-	background: transparent !important;
+	border: 0;
+	outline: none;
+	box-shadow: none;
+	background: transparent;
 	text-align: left;
 }
 
-.porygon-ask-input:hover,
-.porygon-ask-input:focus,
-.porygon-ask-input:focus-visible {
-	border: 0 !important;
-	outline: none !important;
-	box-shadow: none !important;
-	background: transparent !important;
+.porygon-ask-input.porygon-ask-input:hover,
+.porygon-ask-input.porygon-ask-input:focus,
+.porygon-ask-input.porygon-ask-input:focus-visible {
+	border: 0;
+	outline: none;
+	box-shadow: none;
+	background: transparent;
 }
 
 .porygon-ask-input-row .porygon-send-button {

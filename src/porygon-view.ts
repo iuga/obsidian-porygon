@@ -242,6 +242,7 @@ export class PorygonView extends ItemView {
 		this.chatHistoryEl = main.createDiv({ cls: "porygon-chat-history" });
 		this.renderMessages();
 		this.renderComposer(main);
+		this.updateStreamingIndicator();
 		void this.updateHealthStatus();
 	}
 
@@ -357,7 +358,6 @@ export class PorygonView extends ItemView {
 		const listEl = details.createEl("ul", { cls: "porygon-tools-list" });
 		(message.toolIntents ?? []).forEach((toolIntent) => {
 			const itemEl = listEl.createEl("li", { cls: "porygon-tools-item" });
-			itemEl.createSpan({ cls: "porygon-tools-name", text: toolIntent.name });
 			itemEl.createSpan({ cls: "porygon-tools-intent", text: toolIntent.intent });
 		});
 	}
@@ -1549,6 +1549,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private updateSendButtonState(): void {
+		this.updateStreamingIndicator();
 		if (!this.sendButtonEl || !this.composerInputEl) {
 			return;
 		}
@@ -1563,6 +1564,11 @@ export class PorygonView extends ItemView {
 		const tooltip = this.getSendButtonTooltip(hasMessage);
 		this.sendButtonEl.title = tooltip;
 		this.sendButtonEl.ariaLabel = tooltip;
+	}
+
+	private updateStreamingIndicator(): void {
+		const isActive = this.isStreaming && this.isOnboardingComplete();
+		this.contentEl.toggleClass("is-loading", isActive);
 	}
 
 	private getSendButtonTooltip(hasMessage: boolean): string {
@@ -1606,7 +1612,7 @@ export class PorygonView extends ItemView {
 		this.messages.push({ role: "user", content, createdAt, mentions: mentionSnapshots });
 		const fileMessages = await this.createFileContextMessages(mentionSnapshots);
 		this.messages.push(...fileMessages);
-		const porygonMessage: ChatMessage = { role: "porygon", content: "Thinking...", createdAt: new Date().toISOString() };
+		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString() };
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
 		this.updateSendButtonState();
@@ -1623,9 +1629,11 @@ export class PorygonView extends ItemView {
 		try {
 			let thinkingStartedAt: number | null = null;
 			let hasStartedStreamingContent = false;
+			let hasPlaceholderContent = true;
 			const clearPendingAnswerPlaceholder = () => {
-				if (!hasStartedStreamingContent && porygonMessage.content === "Thinking...") {
+				if (!hasStartedStreamingContent && hasPlaceholderContent) {
 					porygonMessage.content = "";
+					hasPlaceholderContent = false;
 				}
 			};
 			await streamLocalAgent({
@@ -1685,7 +1693,7 @@ export class PorygonView extends ItemView {
 
 	private getThinkingTitle(message: ChatMessage): string {
 		if (message.thinkingDurationSeconds === undefined) {
-			return "Thinking...";
+			return "Connecting...";
 		}
 
 		const unit = message.thinkingDurationSeconds === 1 ? "second" : "seconds";

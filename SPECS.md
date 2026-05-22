@@ -1,5 +1,7 @@
-## 0.6.0: Ask before guessing, approve before changing
+## 0.6.1: QoL improvements
+Porygon's chat now communicates its state more honestly. While the agent is working, a subtle loading indicator at the top of the panel makes it clear whether it's your turn or Porygon's. The placeholder bubble shown right after you hit send is renamed from `Thinking...` to `Connecting...`, since the agent hasn't actually started thinking yet. The tool-usage panel is leaner too: each entry now shows just the intent, dropping the redundant tool name so the list reads like a clean activity log.
 
+## 0.6.0: Ask before guessing, approve before changing
 Porygon can now pause mid-task and ask you a focused question when it genuinely needs your input, instead of guessing or producing a half-relevant answer. A small popover appears in the chat composer with the question and 2–4 short options; you can click an option, pick one with number keys or arrow keys plus Enter, type a free-form reply, or press Escape to let Porygon continue on its own. Once you answer, Porygon resumes exactly where it left off.
 
 The same pause-and-ask flow also gates destructive vault actions: creating a folder, creating or editing a note, and renaming or moving files now prompt for **Approve** or **Deny**, and you can type a short free-form reason to deny with feedback so Porygon adjusts its next step. A new **YOLO mode** setting auto-approves these prompts when you want Porygon to move without interruptions, and the setting is read live so you can toggle it mid-conversation.
@@ -7,7 +9,6 @@ The same pause-and-ask flow also gates destructive vault actions: creating a fol
 The `list` tool now returns folders alongside notes, so Porygon can find and act on folders by name. The selected option in the prompt uses your theme's accent color for clear contrast on both light and dark themes.
 
 ## 0.5.0: Persistent agent memory and Obsidian-native session metadata
-
 Porygon now uses a LangGraph `MemorySaver` checkpointer keyed by a per-session UUID so the agent remembers prior turns within a session without resending full history each call. Saved sessions store their metadata as Obsidian-native YAML frontmatter (`id`, `title`, and a flat `mentions:` list of vault paths) instead of a custom comment block, making it queryable through the Properties panel, Dataview, and Bases; on load, mentioned notes and folders are auto-resolved from their paths and re-injected as file context. **Breaking change:** session files saved before 0.5.0 (custom `%%porygon:metadata%%` blocks and timestamp-based filenames) are no longer readable — start fresh or migrate manually.
 
 ## 0.4.0: Agent skills loaded on demand
