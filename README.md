@@ -18,6 +18,7 @@ Porygon is a simple and practical workspace for thinking, learning, and daily wo
 - **AI-powered chat:** Talk with local Ollama models directly from Obsidian with streaming Markdown responses.
 - **Agent tools:** Let the assistant search, read, create, and edit notes in your vault through built-in tools.
 - **Semantic search:** Find relevant notes by meaning instead of exact words, making it easier to discover related content across your vault.
+- **Long-term memory:** Porygon remembers short, concrete facts you share, keeping them across sessions so it can build on prior context instead of starting from scratch.
 - **Skills:** Teach the assistant reusable procedures with simple Markdown files stored in your vault, loaded on demand.
 - **Ask before guessing:** Porygon can pause mid-task to ask you a focused question with a few options when it needs your input, then resume where it left off.
 - **Approve before changing:** Destructive vault actions (create folder, create or edit a note, rename or move files) prompt for approval, with the option to deny with a short free-form reason so Porygon adjusts its next step. Turn on **YOLO mode** in settings to auto-approve when you want to move fast.
@@ -25,7 +26,11 @@ Porygon is a simple and practical workspace for thinking, learning, and daily wo
 
 ### Agent tools
 
-Porygon includes built-in tools like **list**, **search**, **semantic search**, **view**, **edit**, **rename**, **create folder**, **copy**, **active file**, **backlinks**, **load skill**, and **ask user** so the assistant can understand, navigate, organize, modify, and clarify things in your vault directly during a conversation.
+Porygon includes built-in tools like **list**, **search**, **semantic search**, **view**, **edit**, **rename**, **create folder**, **copy**, **active file**, **backlinks**, **load skill**, **save memory**, and **ask user** so the assistant can understand, navigate, organize, modify, and clarify things in your vault directly during a conversation.
+
+### Memories
+
+Porygon can save short, concrete observations about you and your work as long-term memories. Each entry has an importance level (high, medium, low) and a timestamp, and the most important and recent memories are sent with every conversation so the assistant remembers what matters. You can review, edit, or delete memories at any time from the **Memories** field under the Personalization section in settings.
 
 ### Skills
 
