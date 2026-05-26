@@ -1,14 +1,25 @@
-import { debounce, PluginSettingTab, Setting } from "obsidian";
+import { debounce, DropdownComponent, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "./main";
+import { OllamaHttpClient, OllamaModel } from "./ollama-client";
 import { RagIndexProgress } from "./rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
+
+type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
 
 export class PorygonSettingTab extends PluginSettingTab {
 	plugin: PorygonPlugin;
 	private statusSetting: Setting | null = null;
 	private unsubscribeProgress: (() => void) | null = null;
+	private chatModelSetting: Setting | null = null;
+	private embeddingModelSetting: Setting | null = null;
+	private models: OllamaModel[] = [];
+	private modelsError: string | null = null;
+	private modelsLoading = false;
 	private readonly persistSettings = debounce(() => {
 		void this.plugin.saveSettings();
+	}, 400, true);
+	private readonly refreshModels = debounce(() => {
+		void this.loadModels();
 	}, 400, true);
 
 	constructor(plugin: PorygonPlugin) {
@@ -28,32 +39,21 @@ export class PorygonSettingTab extends PluginSettingTab {
 			.addText((text) => text
 				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaHost)
 				.setValue(this.plugin.settings.ollamaHost)
-				.onChange(async (value) => {
+				.onChange((value) => {
 					this.plugin.settings.ollamaHost = value.trim();
-					await this.plugin.saveSettings();
+					this.persistSettings();
+					this.refreshModels();
 				}));
 
-		new Setting(containerEl)
+		this.chatModelSetting = new Setting(containerEl)
 			.setName("Ollama chat model")
-			.setDesc("Model used for chat responses.")
-			.addText((text) => text
-				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaChatModel)
-				.setValue(this.plugin.settings.ollamaChatModel)
-				.onChange(async (value) => {
-					this.plugin.settings.ollamaChatModel = value.trim();
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
+			.setDesc("Model used for chat responses.");
+		this.embeddingModelSetting = new Setting(containerEl)
 			.setName("Ollama embeddings model")
-			.setDesc("Model used for semantic search.")
-			.addText((text) => text
-				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaEmbeddingModel)
-				.setValue(this.plugin.settings.ollamaEmbeddingModel)
-				.onChange(async (value) => {
-					this.plugin.settings.ollamaEmbeddingModel = value.trim();
-					await this.plugin.saveSettings();
-				}));
+			.setDesc("Model used for semantic search.");
+		this.renderModelDropdown("ollamaChatModel", this.chatModelSetting);
+		this.renderModelDropdown("ollamaEmbeddingModel", this.embeddingModelSetting);
+		void this.loadModels();
 
 		this.renderSectionHeading(containerEl, "Personalization", "Customize the instructions sent before each chat.");
 
@@ -149,6 +149,85 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.unsubscribeProgress?.();
 		this.unsubscribeProgress = null;
 		this.statusSetting = null;
+		this.chatModelSetting = null;
+		this.embeddingModelSetting = null;
+	}
+
+	private async loadModels(): Promise<void> {
+		this.modelsLoading = true;
+		this.modelsError = null;
+		this.refreshModelDropdowns();
+		try {
+			const host = this.plugin.settings.ollamaHost || ONBOARDING_DEFAULTS.ollamaHost;
+			const client = new OllamaHttpClient(host);
+			await client.version();
+			const response = await client.list();
+			this.models = response.models;
+		} catch (error) {
+			this.models = [];
+			this.modelsError = error instanceof Error ? error.message : "Unable to reach Ollama.";
+		} finally {
+			this.modelsLoading = false;
+			this.refreshModelDropdowns();
+		}
+	}
+
+	private refreshModelDropdowns(): void {
+		if (this.chatModelSetting) {
+			this.renderModelDropdown("ollamaChatModel", this.chatModelSetting);
+		}
+		if (this.embeddingModelSetting) {
+			this.renderModelDropdown("ollamaEmbeddingModel", this.embeddingModelSetting);
+		}
+	}
+
+	private renderModelDropdown(settingKey: ModelSettingKey, setting: Setting): void {
+		setting.controlEl.empty();
+		const desc = settingKey === "ollamaChatModel" ? "Model used for chat responses." : "Model used for semantic search.";
+		if (this.modelsLoading) {
+			setting.setDesc(`${desc} Loading models...`);
+		} else if (this.modelsError) {
+			setting.setDesc(`${desc} Unable to reach Ollama at ${this.plugin.settings.ollamaHost || ONBOARDING_DEFAULTS.ollamaHost}.`);
+		} else if (this.models.length === 0) {
+			setting.setDesc(`${desc} No models installed. Run e.g. "ollama pull gemma3".`);
+		} else {
+			setting.setDesc(desc);
+		}
+
+		setting.addDropdown((dropdown: DropdownComponent) => {
+			const modelNames = this.models.map((model) => model.name);
+			const current = this.plugin.settings[settingKey];
+			if (modelNames.length === 0) {
+				dropdown.addOption("", current || "No models available");
+				dropdown.setValue("");
+				dropdown.selectEl.disabled = true;
+				return;
+			}
+
+			const optionValues = current && !modelNames.includes(current) ? [current, ...modelNames] : modelNames;
+			optionValues.forEach((name) => dropdown.addOption(name, name));
+			dropdown.setValue(this.pickModelValue(settingKey, modelNames));
+			dropdown.onChange((value) => {
+				this.plugin.settings[settingKey] = value;
+				this.persistSettings();
+			});
+		});
+	}
+
+	private pickModelValue(settingKey: ModelSettingKey, modelNames: string[]): string {
+		const current = this.plugin.settings[settingKey];
+		if (current) {
+			return current;
+		}
+		const defaultValue = settingKey === "ollamaChatModel" ? ONBOARDING_DEFAULTS.ollamaChatModel : ONBOARDING_DEFAULTS.ollamaEmbeddingModel;
+		const latestValue = `${defaultValue}:latest`;
+		if (modelNames.includes(latestValue)) {
+			return latestValue;
+		}
+		if (modelNames.includes(defaultValue)) {
+			return defaultValue;
+		}
+		return modelNames[0] ?? "";
 	}
 
 	private subscribeToIndexProgress(): void {
