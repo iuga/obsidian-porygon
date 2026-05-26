@@ -1,4 +1,5 @@
 import defaultPersonalPrompt from "../prompts/personal.md";
+import { DEFAULT_MEMORIES } from "./memories";
 
 export interface PorygonPluginSettings {
 	ollamaHost: string;
@@ -9,6 +10,7 @@ export interface PorygonPluginSettings {
 	yolo: boolean;
 	ragIgnoredPaths: string;
 	personalPrompt: string;
+	memories: string;
 }
 
 export const DEFAULT_PERSONAL_PROMPT = defaultPersonalPrompt.trim();
@@ -22,6 +24,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	yolo: false,
 	ragIgnoredPaths: "",
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
+	memories: DEFAULT_MEMORIES,
 };
 
 export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
@@ -33,4 +36,5 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	yolo: false,
 	ragIgnoredPaths: "",
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
+	memories: DEFAULT_MEMORIES,
 };

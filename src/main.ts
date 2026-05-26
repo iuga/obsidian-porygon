@@ -5,6 +5,7 @@ import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
+import { sanitizeMemories } from "./memories";
 import { SkillsService } from "./skills";
 
 export default class PorygonPlugin extends Plugin {
@@ -75,9 +76,11 @@ export default class PorygonPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const savedSettings = await this.loadData() as Partial<PorygonPluginSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings);
+		this.settings.memories = sanitizeMemories(this.settings.memories);
 	}
 
 	async saveSettings(): Promise<void> {
+		this.settings.memories = sanitizeMemories(this.settings.memories);
 		await this.saveData(this.settings);
 		this.ragIndexer.updateSettings(this.settings);
 		this.ragSemanticSearch.updateSettings(this.settings);

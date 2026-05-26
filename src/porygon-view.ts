@@ -1557,6 +1557,7 @@ export class PorygonView extends ItemView {
 		this.sendButtonEl.empty();
 		this.sendButtonEl.toggleClass("is-healthy", this.isHealthy);
 		this.sendButtonEl.toggleClass("is-unhealthy", !this.isHealthy);
+		this.composerEl?.toggleClass("is-unhealthy", !this.isHealthy);
 		setIcon(this.sendButtonEl, this.isHealthy ? "send-horizontal" : "unlink");
 
 		const hasMessage = this.composerInputEl.value.trim().length > 0 || this.selectedMentions.length > 0;
@@ -1648,6 +1649,13 @@ export class PorygonView extends ItemView {
 				messages: agentMessages,
 				skills: this.plugin.skills,
 				sessionId: this.currentSessionId,
+				memoriesStore: {
+					get: () => this.plugin.settings.memories,
+					set: async (raw) => {
+						this.plugin.settings.memories = raw;
+						await this.plugin.saveSettings();
+					},
+				},
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();
