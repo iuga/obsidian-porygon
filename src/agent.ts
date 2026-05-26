@@ -75,13 +75,12 @@ const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 words) for a conversation that starts with this message. Return ONLY the title, nothing else. Use the user's initial message as context when generating your response.";
 
 export async function streamLocalAgent(options: LocalAgentOptions, handlers: LocalAgentStreamHandlers = {}): Promise<LocalAgentResponse> {
-	const defaultPrompt = DEFAULT_SYSTEM_PROMPT
+	const defaultPrompt = DEFAULT_SYSTEM_PROMPT;
 	const skillsPrompt = buildAvailableSkillsPrompt(options.skills.getSkills());
 	const contextPrompt = buildContextPromptBlock();
 	const memoryPrompt = buildMemoryPromptBlock(options.memoriesStore.get());
 	const personalPrompt = options.personalPrompt.trim();
 	const systemPrompt = [defaultPrompt, skillsPrompt, contextPrompt, memoryPrompt, personalPrompt].filter(Boolean).join("\n\n");
-	// console.debug("[Porygon Agent] systemPrompt", systemPrompt);
 	const agent = createAgent({
 		model: new ChatOllama({
 			baseUrl: options.ollamaHost,
@@ -308,10 +307,21 @@ function toLangChainMessage(message: AgentChatMessage): BaseMessageLike {
 }
 
 function buildContextPromptBlock(): string {
-	const timestamp = new Date().toISOString();
+	const now = new Date();
+	const datetimeUtc = now.toISOString();
+	const datetimeLocal = formatLocalDatetime(now);
 	const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
 	const currentOs = detectOs();
-	return `<context>\n- datetime: ${timestamp}\n- tz: ${timezone}\n- os: ${currentOs}\n</context>`;
+	return `<context>\n- datetime: ${datetimeLocal}\n- datetime_utc: ${datetimeUtc}\n- tz: ${timezone}\n- os: ${currentOs}\n</context>`;
+}
+
+function formatLocalDatetime(date: Date): string {
+	const pad = (value: number) => value.toString().padStart(2, "0");
+	const offsetMinutes = -date.getTimezoneOffset();
+	const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+	const absOffset = Math.abs(offsetMinutes);
+	const offset = `${offsetSign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset}`;
 }
 
 function detectOs(): string {

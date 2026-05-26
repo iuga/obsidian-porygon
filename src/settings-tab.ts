@@ -1,4 +1,4 @@
-import { PluginSettingTab, Setting } from "obsidian";
+import { debounce, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "./main";
 import { RagIndexProgress } from "./rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
@@ -7,6 +7,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 	plugin: PorygonPlugin;
 	private statusSetting: Setting | null = null;
 	private unsubscribeProgress: (() => void) | null = null;
+	private readonly persistSettings = debounce(() => {
+		void this.plugin.saveSettings();
+	}, 400, true);
 
 	constructor(plugin: PorygonPlugin) {
 		super(plugin.app, plugin);
@@ -60,9 +63,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 			.addTextArea((textArea) => {
 				textArea
 					.setValue(this.plugin.settings.personalPrompt)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.personalPrompt = value;
-						await this.plugin.saveSettings();
+						this.persistSettings();
 					});
 				textArea.inputEl.rows = 14;
 				textArea.inputEl.addClass("porygon-settings-prompt");
@@ -75,9 +78,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 			.addTextArea((textArea) => {
 				textArea
 					.setValue(this.plugin.settings.memories)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.memories = value;
-						await this.plugin.saveSettings();
+						this.persistSettings();
 					});
 				textArea.inputEl.rows = 10;
 				textArea.inputEl.addClass("porygon-settings-prompt");
@@ -127,9 +130,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 				textArea
 					.setPlaceholder("Archive/\nPrivate/*.md")
 					.setValue(this.plugin.settings.ragIgnoredPaths)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.plugin.settings.ragIgnoredPaths = value;
-						await this.plugin.saveSettings();
+						this.persistSettings();
 					});
 				textArea.inputEl.rows = 5;
 				textArea.inputEl.addClass("porygon-settings-ignored-paths");
@@ -138,6 +141,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	}
 
 	hide(): void {
+		this.persistSettings.run();
 		this.unsubscribeProgress?.();
 		this.unsubscribeProgress = null;
 		this.statusSetting = null;
