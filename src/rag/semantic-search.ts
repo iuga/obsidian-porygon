@@ -9,16 +9,22 @@ export class RagSemanticSearchService {
 	private settings: PorygonPluginSettings;
 	private store: RagIndexedDbStore;
 	private cachedEmbeddings: { host: string; model: string; client: OllamaEmbeddings } | null = null;
+	private watchedHost = "";
+	private watchedEmbeddingModel = "";
 
 	constructor(settings: PorygonPluginSettings, store: RagIndexedDbStore) {
 		this.settings = settings;
 		this.store = store;
+		this.watchedHost = settings.ollamaHost;
+		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
-		if (this.settings.ollamaHost !== settings.ollamaHost || this.settings.ollamaEmbeddingModel !== settings.ollamaEmbeddingModel) {
+		if (this.watchedHost !== settings.ollamaHost || this.watchedEmbeddingModel !== settings.ollamaEmbeddingModel) {
 			this.cachedEmbeddings = null;
 		}
+		this.watchedHost = settings.ollamaHost;
+		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 		this.settings = settings;
 	}
 

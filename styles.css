@@ -852,6 +852,38 @@
 	display: none;
 }
 
+.porygon-step-hint {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-1);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+}
+
+.porygon-step-hint-icon {
+	display: inline-flex;
+	flex-shrink: 0;
+	margin-top: 1px;
+}
+
+.porygon-step-hint-icon svg {
+	width: var(--icon-xs, 14px);
+	height: var(--icon-xs, 14px);
+}
+
+.porygon-step-hint-text code {
+	padding: 0 var(--size-2-1);
+	background: var(--code-background);
+	font-size: var(--font-smallest);
+}
+
+.porygon-experience-description {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+}
+
 .porygon-hint {
 	display: flex;
 	gap: var(--size-4-2);

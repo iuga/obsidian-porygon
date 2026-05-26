@@ -2,17 +2,23 @@ import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIc
 import { AgentChatMessage, AgentToolCallIntent, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
 import PorygonPlugin from "./main";
 import { OllamaHttpClient, OllamaModel } from "./ollama-client";
-import { ONBOARDING_DEFAULTS } from "./settings";
+import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 
-type OnboardingScreen = "welcome" | "ollamaHost" | "ollamaChatModel" | "ollamaEmbeddingModel";
-type OnboardingSettingKey = "ollamaHost" | "ollamaChatModel" | "ollamaEmbeddingModel";
+type OnboardingScreen = "welcome" | "ollamaHost" | "ollamaChatModel" | "ollamaEmbeddingModel" | "experience";
+type OnboardingSettingKey = "ollamaHost" | "ollamaChatModel" | "ollamaEmbeddingModel" | "experience";
+
+interface SettingStepHint {
+	text: string;
+	code?: string;
+}
 
 interface SettingStep {
 	key: OnboardingSettingKey;
 	label: string;
 	message: string;
+	hint: SettingStepHint;
 }
 
 type ChatRole = "user" | "porygon" | "warning" | "file";
@@ -79,9 +85,30 @@ interface ChatMessage {
 }
 
 const SETTING_STEPS: SettingStep[] = [
-	{ key: "ollamaHost", label: "Ollama Host", message: "Where is Ollama running?" },
-	{ key: "ollamaChatModel", label: "Ollama Chat Model", message: "Choose a chat model." },
-	{ key: "ollamaEmbeddingModel", label: "Ollama Embeddings Model", message: "Choose an embeddings model." },
+	{
+		key: "ollamaHost",
+		label: "Ollama Host",
+		message: "Where is Ollama running?",
+		hint: { text: "After installing, the default URL is", code: "http://localhost:11434" },
+	},
+	{
+		key: "ollamaChatModel",
+		label: "Ollama Chat Model",
+		message: "Choose a chat model.",
+		hint: { text: "We recommend gemma4", code: "ollama run gemma4:latest" },
+	},
+	{
+		key: "ollamaEmbeddingModel",
+		label: "Ollama Embeddings Model",
+		message: "Choose an embeddings model.",
+		hint: { text: "We recommend Qwen3", code: "ollama run qwen3-embedding:8b" },
+	},
+	{
+		key: "experience",
+		label: "Experience",
+		message: "How much should Porygon show its work?",
+		hint: { text: "You can change this anytime in", code: "Settings \u2192 Porygon \u2192 Chat" },
+	},
 ];
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -471,7 +498,7 @@ export class PorygonView extends ItemView {
 			const rail = row.createDiv({ cls: "porygon-step-rail" });
 			rail.createDiv({ cls: "porygon-step-node", text: isComplete ? "✓" : String(index + 1) });
 			const card = row.createDiv({ cls: "porygon-step-card" });
-			this.renderStepSummary(card, step, isComplete);
+			this.renderStepSummary(card, step, isComplete, isActive);
 
 			if (isComplete) {
 				row.addEventListener("click", () => {
@@ -486,12 +513,15 @@ export class PorygonView extends ItemView {
 		});
 	}
 
-	private renderStepSummary(containerEl: HTMLElement, step: SettingStep, isComplete: boolean): void {
+	private renderStepSummary(containerEl: HTMLElement, step: SettingStep, isComplete: boolean, isActive: boolean): void {
 		const header = containerEl.createDiv({ cls: "porygon-step-card-header" });
 		header.createEl("strong", { text: step.label });
 
-		if (isComplete) {
-			const value = this.plugin.settings[step.key];
+		if (isComplete && !isActive) {
+			const rawValue = this.plugin.settings[step.key];
+			const value = step.key === "experience"
+				? (EXPERIENCE_PRESETS.find((entry) => entry.value === rawValue)?.label ?? rawValue)
+				: rawValue;
 			header.createSpan({ cls: "porygon-step-value", text: value });
 			return;
 		}
@@ -507,11 +537,33 @@ export class PorygonView extends ItemView {
 
 		if (stepKey === "ollamaChatModel" || stepKey === "ollamaEmbeddingModel") {
 			this.renderModelEditor(containerEl, stepKey);
+			return;
+		}
+
+		if (stepKey === "experience") {
+			this.renderExperienceEditor(containerEl);
+		}
+	}
+
+	private renderStepHint(containerEl: HTMLElement, stepKey: OnboardingSettingKey): void {
+		const step = SETTING_STEPS.find((entry) => entry.key === stepKey);
+		if (!step) {
+			return;
+		}
+		const hintEl = containerEl.createDiv({ cls: "porygon-step-hint", attr: { role: "note" } });
+		const iconEl = hintEl.createSpan({ cls: "porygon-step-hint-icon" });
+		setIcon(iconEl, "info");
+		const textEl = hintEl.createSpan({ cls: "porygon-step-hint-text" });
+		textEl.appendText(step.hint.text);
+		if (step.hint.code) {
+			textEl.appendText(" ");
+			textEl.createEl("code", { text: step.hint.code });
 		}
 	}
 
 	private renderHostEditor(containerEl: HTMLElement): void {
 		const editor = containerEl.createDiv({ cls: "porygon-step-editor" });
+		this.renderStepHint(editor, "ollamaHost");
 		const input = editor.createEl("input", {
 			attr: {
 				type: "text",
@@ -529,6 +581,7 @@ export class PorygonView extends ItemView {
 
 	private renderModelEditor(containerEl: HTMLElement, settingKey: "ollamaChatModel" | "ollamaEmbeddingModel"): void {
 		const editor = containerEl.createDiv({ cls: "porygon-step-editor" });
+		this.renderStepHint(editor, settingKey);
 		const defaultValue = settingKey === "ollamaChatModel" ? ONBOARDING_DEFAULTS.ollamaChatModel : ONBOARDING_DEFAULTS.ollamaEmbeddingModel;
 		const select = editor.createEl("select");
 		const modelNames = this.models.map((model) => model.name);
@@ -613,6 +666,58 @@ export class PorygonView extends ItemView {
 				return;
 			}
 
+			this.screen = "experience";
+			this.render();
+		} finally {
+			this.setLoading(button, false);
+		}
+	}
+
+	private renderExperienceEditor(containerEl: HTMLElement): void {
+		const editor = containerEl.createDiv({ cls: "porygon-step-editor" });
+		this.renderStepHint(editor, "experience");
+
+		const select = editor.createEl("select");
+		const currentValue = this.plugin.settings.experience || ONBOARDING_DEFAULTS.experience;
+		EXPERIENCE_PRESETS.forEach((preset) => {
+			const option = select.createEl("option", { text: preset.label, value: preset.value });
+			option.selected = preset.value === currentValue;
+		});
+
+		const description = editor.createDiv({ cls: "porygon-experience-description" });
+		const updateDescription = () => {
+			const preset = EXPERIENCE_PRESETS.find((entry) => entry.value === select.value);
+			description.setText(preset?.description ?? "");
+		};
+		updateDescription();
+		select.addEventListener("change", updateDescription);
+
+		const errorEl = editor.createDiv({ cls: "porygon-onboarding-error" });
+		const button = this.createNextButton(editor);
+
+		button.addEventListener("click", (event) => {
+			event.stopPropagation();
+			void this.handleExperienceNext(select.value as ExperiencePreset, errorEl, button);
+		});
+	}
+
+	private async handleExperienceNext(value: ExperiencePreset, errorEl: HTMLElement, button: HTMLButtonElement): Promise<void> {
+		errorEl.empty();
+		const preset = EXPERIENCE_PRESETS.find((entry) => entry.value === value);
+
+		if (!preset) {
+			errorEl.setText("Pick an experience.");
+			return;
+		}
+
+		this.setLoading(button, true);
+
+		try {
+			this.plugin.settings.experience = preset.value;
+			this.plugin.settings.ollamaThinking = preset.ollamaThinking;
+			this.plugin.settings.showToolUsage = preset.showToolUsage;
+			this.plugin.settings.yolo = preset.yolo;
+			await this.plugin.saveSettings();
 			this.renderPorygon();
 		} finally {
 			this.setLoading(button, false);
@@ -2126,7 +2231,11 @@ export class PorygonView extends ItemView {
 			return 1;
 		}
 
-		return 2;
+		if (this.screen === "ollamaEmbeddingModel") {
+			return 2;
+		}
+
+		return 3;
 	}
 
 	private getInitialScreen(): OnboardingScreen {
@@ -2142,7 +2251,11 @@ export class PorygonView extends ItemView {
 			return "ollamaEmbeddingModel";
 		}
 
-		return "ollamaEmbeddingModel";
+		if (!this.plugin.settings.experience) {
+			return "experience";
+		}
+
+		return "experience";
 	}
 
 	private isStepComplete(stepKey: OnboardingSettingKey): boolean {
@@ -2153,7 +2266,8 @@ export class PorygonView extends ItemView {
 		return Boolean(
 			this.plugin.settings.ollamaHost &&
 			this.plugin.settings.ollamaChatModel &&
-			this.plugin.settings.ollamaEmbeddingModel
+			this.plugin.settings.ollamaEmbeddingModel &&
+			this.plugin.settings.experience
 		);
 	}
 }

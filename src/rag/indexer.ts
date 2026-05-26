@@ -29,6 +29,8 @@ export class RagIndexer {
 	private cachedEmbeddings: { host: string; model: string; client: OllamaEmbeddings } | null = null;
 	private ignoreMatcher: IgnoreMatcher;
 	private ignoreSource = "";
+	private watchedHost = "";
+	private watchedEmbeddingModel = "";
 	private progress: RagIndexProgress = {
 		status: "idle",
 		indexedFiles: 0,
@@ -45,6 +47,8 @@ export class RagIndexer {
 		this.store = store;
 		this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
 		this.ignoreSource = settings.ragIgnoredPaths;
+		this.watchedHost = settings.ollamaHost;
+		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 	}
 
 	getProgress(): RagIndexProgress {
@@ -76,6 +80,10 @@ export class RagIndexer {
 
 	async reconcile(): Promise<void> {
 		if (this.disposed || this.isReconciling) {
+			return;
+		}
+
+		if (!this.isEmbeddingConfigured()) {
 			return;
 		}
 
@@ -149,6 +157,10 @@ export class RagIndexer {
 			return;
 		}
 
+		if (!this.isEmbeddingConfigured()) {
+			return;
+		}
+
 		this.queue.push(file);
 		this.queuedPaths.add(file.path);
 		void this.refreshProgress({ status: "indexing" });
@@ -190,10 +202,12 @@ export class RagIndexer {
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
-		const hostOrModelChanged = this.settings.ollamaHost !== settings.ollamaHost ||
-			this.settings.ollamaEmbeddingModel !== settings.ollamaEmbeddingModel;
+		const hostOrModelChanged = this.watchedHost !== settings.ollamaHost ||
+			this.watchedEmbeddingModel !== settings.ollamaEmbeddingModel;
 		const ignoreChanged = this.ignoreSource !== settings.ragIgnoredPaths;
 		this.settings = settings;
+		this.watchedHost = settings.ollamaHost;
+		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 
 		if (ignoreChanged) {
 			this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
@@ -344,6 +358,10 @@ export class RagIndexer {
 		};
 
 		await this.store.replaceFile({ file: fileRecord, chunks: chunkRecords, vectors: vectorRecords });
+	}
+
+	private isEmbeddingConfigured(): boolean {
+		return Boolean(this.settings.ollamaHost && this.settings.ollamaEmbeddingModel);
 	}
 
 	private getEmbeddingsClient(): OllamaEmbeddings {
