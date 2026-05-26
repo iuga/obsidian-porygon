@@ -1557,6 +1557,7 @@ export class PorygonView extends ItemView {
 		this.sendButtonEl.empty();
 		this.sendButtonEl.toggleClass("is-healthy", this.isHealthy);
 		this.sendButtonEl.toggleClass("is-unhealthy", !this.isHealthy);
+		this.composerEl?.toggleClass("is-unhealthy", !this.isHealthy);
 		setIcon(this.sendButtonEl, this.isHealthy ? "send-horizontal" : "unlink");
 
 		const hasMessage = this.composerInputEl.value.trim().length > 0 || this.selectedMentions.length > 0;

@@ -268,6 +268,11 @@
 	background: var(--background-primary);
 }
 
+.porygon-composer.is-unhealthy {
+	border-color: var(--color-red);
+	box-shadow: 0 0 0 1px var(--color-red);
+}
+
 .porygon-attachments:empty,
 .porygon-mention-tags:empty {
 	display: none;
