@@ -81,7 +81,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const memoryPrompt = buildMemoryPromptBlock(options.memoriesStore.get());
 	const personalPrompt = options.personalPrompt.trim();
 	const systemPrompt = [defaultPrompt, skillsPrompt, contextPrompt, memoryPrompt, personalPrompt].filter(Boolean).join("\n\n");
-	console.debug("[Porygon Agent] systemPrompt", systemPrompt);
+	// console.debug("[Porygon Agent] systemPrompt", systemPrompt);
 	const agent = createAgent({
 		model: new ChatOllama({
 			baseUrl: options.ollamaHost,
