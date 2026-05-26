@@ -12,6 +12,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	private unsubscribeProgress: (() => void) | null = null;
 	private models: string[] = [];
 	private modelsHost: string | null = null;
+	private modelsStatus: "loading" | "ok" | "error" = "loading";
 	private readonly persist = debounce(() => {
 		void this.plugin.saveSettings();
 	}, 400, true);
@@ -44,7 +45,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Ollama host")
-			.setDesc("Host for ollama.")
+			.setDesc(this.getHostStatusDesc())
 			.addText((text) => text
 				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaHost)
 				.setValue(this.plugin.settings.ollamaHost)
@@ -178,24 +179,39 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 	private async loadModels(host: string): Promise<void> {
 		this.modelsHost = host;
+		this.modelsStatus = "loading";
 		let models: string[] = [];
+		let ok = false;
 		try {
 			const client = new OllamaHttpClient(host);
 			await client.version();
 			models = (await client.list()).models.map((m) => m.name);
+			ok = true;
 		} catch {
-			models = [];
+			ok = false;
 		}
 		// Skip stale responses if the host changed while we were fetching.
 		if (this.modelsHost !== host) {
 			return;
 		}
 		this.models = models;
+		this.modelsStatus = ok ? "ok" : "error";
 		this.display();
 	}
 
 	private getHost(): string {
 		return this.plugin.settings.ollamaHost || ONBOARDING_DEFAULTS.ollamaHost;
+	}
+
+	private getHostStatusDesc(): string {
+		switch (this.modelsStatus) {
+			case "loading":
+				return "Connecting to Ollama...";
+			case "ok":
+				return `Connected • ${this.models.length} model${this.models.length === 1 ? "" : "s"} available.`;
+			case "error":
+				return `Unreachable at ${this.getHost()}. Check that Ollama is running, then reload.`;
+		}
 	}
 
 	private pickDefault(key: ModelSettingKey): string {
