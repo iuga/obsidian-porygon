@@ -74,7 +74,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 		const memoriesSetting = new Setting(containerEl)
 			.setName("Memories")
-			.setDesc("Long-term memories the assistant has saved about you. Sorted by importance and recency. Edit or remove lines to curate what the assistant remembers.")
+			.setDesc("Long-term memories the assistant has saved about you. Sorted by importance and recency. Edit or remove lines to curate what the assistant remembers; lines that don't match the format are discarded on save.")
 			.addTextArea((textArea) => {
 				textArea
 					.setValue(this.plugin.settings.memories)
@@ -84,6 +84,10 @@ export class PorygonSettingTab extends PluginSettingTab {
 					});
 				textArea.inputEl.rows = 10;
 				textArea.inputEl.addClass("porygon-settings-prompt");
+				textArea.inputEl.addEventListener("blur", () => {
+					this.persistSettings.run();
+					textArea.setValue(this.plugin.settings.memories);
+				});
 			});
 		memoriesSetting.settingEl.addClass("porygon-settings-prompt-setting");
 

@@ -7,11 +7,6 @@ export interface Memory {
 	content: string;
 }
 
-export interface ParsedMemories {
-	memories: Memory[];
-	unknownLines: string[];
-}
-
 export interface MemoriesStore {
 	get(): string;
 	set(raw: string): Promise<void>;
@@ -27,46 +22,32 @@ export const DEFAULT_MEMORIES = "<memories>\n</memories>";
 
 const MAX_MEMORIES_IN_PROMPT = 50;
 const MEMORY_LINE = /^\[([0-9a-f]+)\]\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s+\[(high|medium|low)\]\s+(.+)$/;
-const MEMORIES_OPEN_TAG = /^<\s*memories\s*>$/i;
-const MEMORIES_CLOSE_TAG = /^<\s*\/\s*memories\s*>$/i;
 const IMPORTANCE_RANK: Record<MemoryImportance, number> = { high: 3, medium: 2, low: 1 };
 
 export function parseMemories(raw: string): Memory[] {
-	return parseMemoriesWithUnknown(raw).memories;
-}
-
-export function parseMemoriesWithUnknown(raw: string): ParsedMemories {
 	const memories: Memory[] = [];
-	const unknownLines: string[] = [];
 	for (const line of raw.split(/\r?\n/)) {
-		const trimmed = line.trim();
-		if (!trimmed || MEMORIES_OPEN_TAG.test(trimmed) || MEMORIES_CLOSE_TAG.test(trimmed)) {
-			continue;
-		}
-		const match = MEMORY_LINE.exec(trimmed);
+		const match = MEMORY_LINE.exec(line.trim());
 		if (!match) {
-			unknownLines.push(line);
 			continue;
 		}
 		const [, id, timestamp, importance, content] = match;
 		memories.push({ id: id!, timestamp: timestamp!, importance: importance as MemoryImportance, content: content! });
 	}
-	return { memories, unknownLines };
+	return memories;
 }
 
-export function serializeMemories(memories: Memory[], unknownLines: string[] = []): string {
-	const lines = sortMemories(memories).map(formatMemoryLine);
-	if (unknownLines.length > 0) {
-		if (lines.length > 0) {
-			lines.push("");
-		}
-		lines.push(...unknownLines);
-	}
-	return lines.length > 0 ? `<memories>\n${lines.join("\n")}\n</memories>` : DEFAULT_MEMORIES;
+export function serializeMemories(memories: Memory[]): string {
+	const body = sortMemories(memories).map(formatMemoryLine).join("\n");
+	return body ? `<memories>\n${body}\n</memories>` : DEFAULT_MEMORIES;
+}
+
+export function sanitizeMemories(raw: string): string {
+	return serializeMemories(parseMemories(raw));
 }
 
 export function buildMemoryPromptBlock(raw: string): string {
-	const sorted = sortMemories(parseMemoriesWithUnknown(raw).memories);
+	const sorted = sortMemories(parseMemories(raw));
 	const included = sorted.slice(0, MAX_MEMORIES_IN_PROMPT);
 	const omitted = sorted.length - included.length;
 	const lines = included.map(formatMemoryLine);
@@ -77,7 +58,7 @@ export function buildMemoryPromptBlock(raw: string): string {
 }
 
 export function applyMemoryChange(raw: string, input: SaveMemoryInput): { raw: string; message: string } {
-	const { memories, unknownLines } = parseMemoriesWithUnknown(raw);
+	const memories = parseMemories(raw);
 	const trimmedContent = input.content.trim();
 
 	if (input.id) {
@@ -87,10 +68,10 @@ export function applyMemoryChange(raw: string, input: SaveMemoryInput): { raw: s
 		}
 		if (trimmedContent === "") {
 			memories.splice(index, 1);
-			return { raw: serializeMemories(memories, unknownLines), message: `Deleted memory ${input.id}` };
+			return { raw: serializeMemories(memories), message: `Deleted memory ${input.id}` };
 		}
 		memories[index] = { id: input.id, timestamp: nowTimestampUtc(), importance: input.importance, content: trimmedContent };
-		return { raw: serializeMemories(memories, unknownLines), message: `Updated memory ${input.id}` };
+		return { raw: serializeMemories(memories), message: `Updated memory ${input.id}` };
 	}
 
 	if (trimmedContent === "") {
@@ -98,7 +79,7 @@ export function applyMemoryChange(raw: string, input: SaveMemoryInput): { raw: s
 	}
 	const id = generateMemoryId();
 	memories.push({ id, timestamp: nowTimestampUtc(), importance: input.importance, content: trimmedContent });
-	return { raw: serializeMemories(memories, unknownLines), message: `Saved memory ${id}` };
+	return { raw: serializeMemories(memories), message: `Saved memory ${id}` };
 }
 
 function sortMemories(memories: Memory[]): Memory[] {
