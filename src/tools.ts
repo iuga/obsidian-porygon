@@ -2,6 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { interrupt, isGraphBubbleUp } from "@langchain/langgraph";
 import { App, normalizePath, prepareSimpleSearch, TFile, TFolder } from "obsidian";
 import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "./rag";
+import { applyMemoryChange, MemoriesStore } from "./memories";
 import { SkillsService } from "./skills";
 import { z } from "zod";
 
@@ -102,17 +103,6 @@ interface BacklinkResult {
 }
 
 const intentSchema = z.string().describe("Brief explanation in ten words or less of why you're calling this function and how it helps achieve the current goal. Use present participle form (e.g., 'Fetching...', 'Calculating...', 'Validating...'). Examples: 'Fetching all notes that contain order to gather context', 'Adding a new paragraph into the orders.md document'");
-
-export const currentTimestampTool = tool(
-	() => new Date().toISOString(),
-	{
-		name: "current_timestamp",
-		description: "Returns the current timestamp in ISO 8601 format.",
-		schema: z.object({
-			intent: intentSchema,
-		}),
-	}
-);
 
 export function createSearchTool(app: App) {
 	return tool(
@@ -600,6 +590,30 @@ export function createLoadSkillTool(skills: SkillsService) {
 	);
 }
 
+export function createSaveMemoryTool(store: MemoriesStore) {
+	return tool(
+		async ({ content, importance, id }: { content: string; importance: "high" | "medium" | "low"; id?: string }): Promise<string> => {
+			try {
+				const result = applyMemoryChange(store.get(), { content, importance, id });
+				await store.set(result.raw);
+				return result.message;
+			} catch (error) {
+				return toToolErrorMessage(error);
+			}
+		},
+		{
+			name: "save_memory",
+			description: "Persist a long-term memory about the user or their context. Memories should be short and concrete; do not store memories that are already defined. Omit id to append a new memory. Provide id with non-empty content to replace an existing memory. Provide id with empty content to delete an existing memory.",
+			schema: z.object({
+				intent: intentSchema,
+				content: z.string().describe("The memory text. Keep it short and concrete. Leave empty only when deleting an existing memory by id."),
+				importance: z.enum(["high", "medium", "low"]).describe("How critical this memory is. Use high for durable facts and constraints, medium for stable preferences, low for transient observations."),
+				id: z.string().optional().describe("Existing memory id to update or delete. Omit to append a new memory."),
+			}),
+		}
+	);
+}
+
 export const askUserTool = tool(
 	async ({ question, options }: { question: string; options: string[] }): Promise<string> => {
 		// Defensive clamp: if the model produced more than 4 options, keep the
@@ -630,8 +644,8 @@ export const askUserTool = tool(
 	}
 );
 
-export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress, skills: SkillsService, getYolo: () => boolean) {
-	return [currentTimestampTool, createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app, getYolo), createRenameTool(app, getYolo), createCreateFolderTool(app, getYolo), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills), askUserTool];
+export function createAgentTools(app: App, semanticSearch: RagSemanticSearchService, getIndexProgress: () => RagIndexProgress, skills: SkillsService, getYolo: () => boolean, memoriesStore: MemoriesStore) {
+	return [createSemanticSearchTool(app, semanticSearch, getIndexProgress), createSearchTool(app), createListTool(app), createViewTool(app), createEditTool(app, getYolo), createRenameTool(app, getYolo), createCreateFolderTool(app, getYolo), createCopyTool(app), createActiveFileTool(app), createBacklinksTool(app), createLoadSkillTool(skills), createSaveMemoryTool(memoriesStore), askUserTool];
 }
 
 function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {

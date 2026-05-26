@@ -1649,6 +1649,13 @@ export class PorygonView extends ItemView {
 				messages: agentMessages,
 				skills: this.plugin.skills,
 				sessionId: this.currentSessionId,
+				memoriesStore: {
+					get: () => this.plugin.settings.memories,
+					set: async (raw) => {
+						this.plugin.settings.memories = raw;
+						await this.plugin.saveSettings();
+					},
+				},
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();

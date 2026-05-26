@@ -69,6 +69,21 @@ export class PorygonSettingTab extends PluginSettingTab {
 			});
 		personalPromptSetting.settingEl.addClass("porygon-settings-prompt-setting");
 
+		const memoriesSetting = new Setting(containerEl)
+			.setName("Memories")
+			.setDesc("Long-term memories the assistant has saved about you. Sorted by importance and recency. Edit or remove lines to curate what the assistant remembers.")
+			.addTextArea((textArea) => {
+				textArea
+					.setValue(this.plugin.settings.memories)
+					.onChange(async (value) => {
+						this.plugin.settings.memories = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 10;
+				textArea.inputEl.addClass("porygon-settings-prompt");
+			});
+		memoriesSetting.settingEl.addClass("porygon-settings-prompt-setting");
+
 		this.renderSectionHeading(containerEl, "Chat", "Control chat behavior and how agent activity appears.");
 
 		new Setting(containerEl)

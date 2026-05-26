@@ -2,11 +2,12 @@ import { AIMessageChunk, BaseMessage, BaseMessageLike } from "@langchain/core/me
 import { ToolCallChunk } from "@langchain/core/messages/tool";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
-import { App } from "obsidian";
+import { App, Platform } from "obsidian";
 import { createAgent } from "langchain";
 import defaultSystemPrompt from "../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "./rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
+import { buildMemoryPromptBlock, MemoriesStore } from "./memories";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export type { AskUserInterruptPayload };
@@ -40,6 +41,7 @@ export interface LocalAgentOptions {
 	messages: AgentChatMessage[];
 	skills: SkillsService;
 	sessionId: string;
+	memoriesStore: MemoriesStore;
 }
 
 export interface AgentToolCallIntent {
@@ -73,8 +75,13 @@ const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 const SESSION_TITLE_SYSTEM_PROMPT = "Generate a short, concise title (max 6 words) for a conversation that starts with this message. Return ONLY the title, nothing else. Use the user's initial message as context when generating your response.";
 
 export async function streamLocalAgent(options: LocalAgentOptions, handlers: LocalAgentStreamHandlers = {}): Promise<LocalAgentResponse> {
+	const defaultPrompt = DEFAULT_SYSTEM_PROMPT
 	const skillsPrompt = buildAvailableSkillsPrompt(options.skills.getSkills());
-	const systemPrompt = [DEFAULT_SYSTEM_PROMPT, skillsPrompt, options.personalPrompt].filter(Boolean).join("\n\n");
+	const contextPrompt = buildContextPromptBlock();
+	const memoryPrompt = buildMemoryPromptBlock(options.memoriesStore.get());
+	const personalPrompt = options.personalPrompt.trim();
+	const systemPrompt = [defaultPrompt, skillsPrompt, contextPrompt, memoryPrompt, personalPrompt].filter(Boolean).join("\n\n");
+	console.debug("[Porygon Agent] systemPrompt", systemPrompt);
 	const agent = createAgent({
 		model: new ChatOllama({
 			baseUrl: options.ollamaHost,
@@ -82,7 +89,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			think: options.ollamaThinking,
 			maxRetries: 0,
 		}),
-		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo),
+		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
 		systemPrompt,
 		checkpointer: agentCheckpointer,
 	});
@@ -298,4 +305,20 @@ function toLangChainMessage(message: AgentChatMessage): BaseMessageLike {
 		role: message.role === "porygon" || message.role === "file" ? "assistant" : message.role,
 		content: message.content,
 	};
+}
+
+function buildContextPromptBlock(): string {
+	const timestamp = new Date().toISOString();
+	const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
+	const currentOs = detectOs();
+	return `<context>\n- datetime: ${timestamp}\n- tz: ${timezone}\n- os: ${currentOs}\n</context>`;
+}
+
+function detectOs(): string {
+	if (Platform.isMacOS) return "macos";
+	if (Platform.isWin) return "windows";
+	if (Platform.isLinux) return "linux";
+	if (Platform.isIosApp) return "ios";
+	if (Platform.isAndroidApp) return "android";
+	return "unknown";
 }
