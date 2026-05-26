@@ -168,7 +168,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 			if (current && !installed) {
 				dd.addOption(current, `${current} (not installed)`);
 			}
-			this.models.forEach((m) => dd.addOption(m, m));
+			this.models.forEach((m) => { dd.addOption(m, m); });
 			dd.setValue(current || this.pickDefault(key));
 			dd.onChange((value) => {
 				this.plugin.settings[key] = value;
