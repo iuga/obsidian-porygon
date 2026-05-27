@@ -7,6 +7,7 @@ import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
 import { sanitizeMemories } from "./memories";
 import { SkillsService } from "./skills";
+import { resetAgent } from "./agent";
 
 export default class PorygonPlugin extends Plugin {
 	settings: PorygonPluginSettings;
@@ -84,6 +85,9 @@ export default class PorygonPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.ragIndexer.updateSettings(this.settings);
 		this.ragSemanticSearch.updateSettings(this.settings);
+		// Settings may have changed host/model/thinking; drop the cached agent
+		// so the next send rebuilds it with the new config.
+		resetAgent();
 	}
 
 	private registerSkillEvents(): void {

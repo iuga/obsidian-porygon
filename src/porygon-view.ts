@@ -164,6 +164,20 @@ export class PorygonView extends ItemView {
 	private isStreaming = false;
 	private isCheckingHealth = false;
 	private isHealthy = true;
+	private streamingMessage: ChatMessage | null = null;
+	private streamingContentEl: HTMLElement | null = null;
+	private streamingThinkingContentEl: HTMLElement | null = null;
+	// rAF coalescing for live markdown renders into the streaming bubble.
+	// Tokens arrive faster than the browser can render; we batch a frame's
+	// worth and only render once per frame. The "in-flight" guard prevents
+	// overlapping async MarkdownRenderer.render() calls from racing on the
+	// same target element.
+	private streamingContentRenderHandle: number | null = null;
+	private streamingContentRenderInFlight = false;
+	private streamingContentRenderPending = false;
+	private streamingThinkingRenderHandle: number | null = null;
+	private streamingThinkingRenderInFlight = false;
+	private streamingThinkingRenderPending = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PorygonPlugin) {
 		super(leaf);
@@ -278,6 +292,11 @@ export class PorygonView extends ItemView {
 			return;
 		}
 
+		// Reset streaming refs; renderMessage will re-populate them if the
+		// currently-streaming message is rendered in this pass.
+		this.streamingContentEl = null;
+		this.streamingThinkingContentEl = null;
+
 		this.chatHistoryEl.empty();
 		if (this.messages.length === 0) {
 			this.renderEmptyChatQuote();
@@ -343,7 +362,15 @@ export class PorygonView extends ItemView {
 		const contentEl = bubble.createDiv({ cls: "porygon-message-content" });
 		if (message.role === "porygon") {
 			contentEl.addClass("markdown-rendered");
-			void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "/", this);
+			if (message === this.streamingMessage) {
+				// Streaming: render current content as markdown into the bubble.
+				// Subsequent deltas re-render the same element in place (rAF-
+				// coalesced) so only this bubble is touched, not history.
+				this.streamingContentEl = contentEl;
+				void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "/", this);
+			} else {
+				void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "/", this);
+			}
 			return;
 		}
 
@@ -363,9 +390,39 @@ export class PorygonView extends ItemView {
 			}, 0);
 		});
 		const contentEl = details.createDiv({ cls: "porygon-thinking-content markdown-rendered" });
-		void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "/", this).then(() => {
+		if (message === this.streamingMessage) {
+			// Live thinking stream: render markdown into the bubble. Subsequent
+			// deltas re-render this same element in place (rAF-coalesced).
+			this.streamingThinkingContentEl = contentEl;
+			void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "/", this).then(() => {
+				if (details.open) {
+					contentEl.scrollTop = contentEl.scrollHeight;
+				}
+			});
+			return;
+		}
+		// Historical thinking: don't markdown-render unless the user opens it.
+		// Avoids paying the cost of N markdown renders on every renderMessages()
+		// pass when the user has many past turns with collapsed thinking blocks.
+		let isRendered = false;
+		const renderThinking = () => {
+			if (isRendered) return;
+			isRendered = true;
+			contentEl.empty();
+			void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "/", this).then(() => {
+				if (details.open) {
+					contentEl.scrollTop = contentEl.scrollHeight;
+				}
+			});
+		};
+		if (details.open) {
+			renderThinking();
+		} else {
+			contentEl.setText(message.thinking ?? "");
+		}
+		details.addEventListener("toggle", () => {
 			if (details.open) {
-				contentEl.scrollTop = contentEl.scrollHeight;
+				renderThinking();
 			}
 		});
 	}
@@ -1701,14 +1758,12 @@ export class PorygonView extends ItemView {
 			return;
 		}
 
-		this.isCheckingHealth = true;
-		this.updateSendButtonState();
-		const isOllamaReachable = await this.updateHealthStatus();
-		this.isCheckingHealth = false;
-		this.updateSendButtonState();
-		if (!isOllamaReachable) {
-			return;
-		}
+		// Don't gate the UI on the health check: showing "Connecting..." can take
+		// seconds if Ollama is slow to respond. We kick off the health check in
+		// the background to update the indicator; if Ollama is actually
+		// unreachable, the agent call below will fail and the catch branch
+		// surfaces the error as a warning bubble.
+		void this.updateHealthStatus();
 
 		const createdAt = new Date().toISOString();
 		this.composerInputEl.value = "";
@@ -1721,6 +1776,7 @@ export class PorygonView extends ItemView {
 		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString() };
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
+		this.streamingMessage = porygonMessage;
 		this.updateSendButtonState();
 		this.renderMessages();
 
@@ -1740,6 +1796,7 @@ export class PorygonView extends ItemView {
 				if (!hasStartedStreamingContent && hasPlaceholderContent) {
 					porygonMessage.content = "";
 					hasPlaceholderContent = false;
+					this.scheduleStreamingContentRender();
 				}
 			};
 			await streamLocalAgent({
@@ -1766,20 +1823,31 @@ export class PorygonView extends ItemView {
 					clearPendingAnswerPlaceholder();
 					porygonMessage.toolIntents = [...(porygonMessage.toolIntents ?? []), toolIntent];
 					porygonMessage.areToolsCollapsed = false;
+					// Tool bubble structure changes (new <li>, possibly first appearance
+					// of the tools <details>). Cheap relative to markdown, and tools
+					// fire infrequently, so a full re-render is acceptable here.
 					this.renderMessages();
 				},
 				onContentDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
 					hasStartedStreamingContent = true;
 					porygonMessage.content += delta;
-					this.renderMessages();
+					this.scheduleStreamingContentRender();
 				},
 				onThinkingDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
+					const wasFirstThinkingDelta = !porygonMessage.thinking;
 					thinkingStartedAt = thinkingStartedAt ?? Date.now();
 					porygonMessage.thinking = `${porygonMessage.thinking ?? ""}${delta}`;
 					porygonMessage.isThinkingCollapsed = false;
-					this.renderMessages();
+					if (wasFirstThinkingDelta) {
+						// First thinking token: the thinking <details> doesn't exist yet,
+						// so do one full render to create its DOM. Subsequent tokens
+						// re-render the thinking bubble in place (rAF-coalesced).
+						this.renderMessages();
+					} else {
+						this.scheduleStreamingThinkingRender();
+					}
 				},
 				onAskUser: (payload) => this.handleAskUser(payload),
 			});
@@ -1793,8 +1861,18 @@ export class PorygonView extends ItemView {
 			if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0) {
 				porygonMessage.areToolsCollapsed = true;
 			}
+			// End of turn: clear streaming state so the porygon message renders
+			// through MarkdownRenderer like every other historical message.
+			this.cancelStreamingRenders();
+			this.streamingMessage = null;
+			this.streamingContentEl = null;
+			this.streamingThinkingContentEl = null;
 			this.renderMessages();
 		} catch (error) {
+			this.cancelStreamingRenders();
+			this.streamingMessage = null;
+			this.streamingContentEl = null;
+			this.streamingThinkingContentEl = null;
 			this.messages = this.messages.filter((message) => message !== porygonMessage);
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 			this.renderMessages();
@@ -1804,9 +1882,107 @@ export class PorygonView extends ItemView {
 		}
 	}
 
+	private scheduleStreamingContentRender(): void {
+		if (!this.streamingContentEl) {
+			// Content target not in the DOM yet (e.g. content arrives after a
+			// thinking-only preamble and the bubble was skipped). Do one full
+			// render to materialize it; subsequent deltas will rAF-coalesce.
+			this.renderMessages();
+			return;
+		}
+		if (this.streamingContentRenderHandle !== null) return;
+		this.streamingContentRenderHandle = window.requestAnimationFrame(() => {
+			this.streamingContentRenderHandle = null;
+			void this.runStreamingContentRender();
+		});
+	}
+
+	private async runStreamingContentRender(): Promise<void> {
+		if (this.streamingContentRenderInFlight) {
+			// Another render is mid-flight; mark that we need one more pass
+			// after it completes to pick up any tokens that arrived since.
+			this.streamingContentRenderPending = true;
+			return;
+		}
+		const target = this.streamingContentEl;
+		const message = this.streamingMessage;
+		if (!target || !message) return;
+		this.streamingContentRenderInFlight = true;
+		try {
+			// Render-then-swap: render into a detached container so the visible
+			// element never shows a half-built tree, then replace its children
+			// in one DOM op. Avoids the empty() + async render race that would
+			// otherwise produce flickers / duplicated content.
+			const staging = document.createElement("div");
+			await MarkdownRenderer.render(this.plugin.app, message.content, staging, "/", this);
+			target.empty();
+			while (staging.firstChild) {
+				target.appendChild(staging.firstChild);
+			}
+			this.scrollChatToBottom();
+		} finally {
+			this.streamingContentRenderInFlight = false;
+			if (this.streamingContentRenderPending) {
+				this.streamingContentRenderPending = false;
+				this.scheduleStreamingContentRender();
+			}
+		}
+	}
+
+	private scheduleStreamingThinkingRender(): void {
+		if (!this.streamingThinkingContentEl) {
+			this.renderMessages();
+			return;
+		}
+		if (this.streamingThinkingRenderHandle !== null) return;
+		this.streamingThinkingRenderHandle = window.requestAnimationFrame(() => {
+			this.streamingThinkingRenderHandle = null;
+			void this.runStreamingThinkingRender();
+		});
+	}
+
+	private async runStreamingThinkingRender(): Promise<void> {
+		if (this.streamingThinkingRenderInFlight) {
+			this.streamingThinkingRenderPending = true;
+			return;
+		}
+		const target = this.streamingThinkingContentEl;
+		const message = this.streamingMessage;
+		if (!target || !message) return;
+		this.streamingThinkingRenderInFlight = true;
+		try {
+			const staging = document.createElement("div");
+			await MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", staging, "/", this);
+			target.empty();
+			while (staging.firstChild) {
+				target.appendChild(staging.firstChild);
+			}
+			target.scrollTop = target.scrollHeight;
+		} finally {
+			this.streamingThinkingRenderInFlight = false;
+			if (this.streamingThinkingRenderPending) {
+				this.streamingThinkingRenderPending = false;
+				this.scheduleStreamingThinkingRender();
+			}
+		}
+	}
+
+	private cancelStreamingRenders(): void {
+		if (this.streamingContentRenderHandle !== null) {
+			window.cancelAnimationFrame(this.streamingContentRenderHandle);
+			this.streamingContentRenderHandle = null;
+		}
+		if (this.streamingThinkingRenderHandle !== null) {
+			window.cancelAnimationFrame(this.streamingThinkingRenderHandle);
+			this.streamingThinkingRenderHandle = null;
+		}
+		this.streamingContentRenderPending = false;
+		this.streamingThinkingRenderPending = false;
+	}
+
 	private getThinkingTitle(message: ChatMessage): string {
 		if (message.thinkingDurationSeconds === undefined) {
-			return "Connecting...";
+			return "Thinking...";
 		}
 
 		const unit = message.thinkingDurationSeconds === 1 ? "second" : "seconds";
