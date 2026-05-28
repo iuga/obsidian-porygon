@@ -1,5 +1,5 @@
-import defaultPersonalPrompt from "../prompts/personal.md";
-import { DEFAULT_MEMORIES } from "./memories";
+import defaultPersonalPrompt from "../../prompts/personal.md";
+import { DEFAULT_MEMORIES } from "../agent/memories";
 
 export type ExperiencePreset = "" | "minimal" | "balanced" | "verbose" | "yolo";
 

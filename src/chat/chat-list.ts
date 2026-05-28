@@ -1,5 +1,5 @@
 import { App, Component } from "obsidian";
-import { MessageRow } from "./MessageRow";
+import { MessageRow } from "./message-row";
 import { ChatMessage, StreamingDeltaKind } from "./types";
 
 interface ChatListDeps {

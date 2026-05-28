@@ -2,7 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { interrupt, isGraphBubbleUp } from "@langchain/langgraph";
 import { App, normalizePath, prepareSimpleSearch, TFile, TFolder } from "obsidian";
 import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "../rag";
-import { applyMemoryChange, MemoriesStore } from "../memories";
+import { applyMemoryChange, MemoriesStore } from "./memories";
 import { SkillsService } from "./skills";
 import { z } from "zod";
 

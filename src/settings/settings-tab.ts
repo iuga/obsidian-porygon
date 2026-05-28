@@ -1,7 +1,7 @@
 import { debounce, PluginSettingTab, Setting } from "obsidian";
-import PorygonPlugin from "./main";
-import { OllamaHttpClient } from "./agent/ollama-client";
-import { RagIndexProgress } from "./rag";
+import PorygonPlugin from "../main";
+import { OllamaHttpClient } from "../agent/ollama-client";
+import { RagIndexProgress } from "../rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";

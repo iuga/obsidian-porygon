@@ -3,9 +3,9 @@ import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
-import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
-import { PorygonSettingTab } from "./settings-tab";
-import { sanitizeMemories } from "./memories";
+import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
+import { PorygonSettingTab } from "./settings/settings-tab";
+import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
 

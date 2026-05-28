@@ -7,7 +7,7 @@ import { createAgent, dynamicSystemPromptMiddleware } from "langchain";
 import defaultSystemPrompt from "../../prompts/system.md";
 import { RagIndexProgress, RagSemanticSearchService } from "../rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
-import { buildMemoryPromptBlock, MemoriesStore } from "../memories";
+import { buildMemoryPromptBlock, MemoriesStore } from "./memories";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export type { AskUserInterruptPayload };
