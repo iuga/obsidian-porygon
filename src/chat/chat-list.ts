@@ -97,9 +97,9 @@ export class ChatList {
 		}
 		requestAnimationFrame(() => {
 			if (!row.el.isConnected) return;
-			const anchorTop = row.el.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top + this.containerEl.scrollTop;
+			const anchorTop = row.el.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top + this.containerEl.scrollTop - 20;
 			this.programmaticScrollPending += 1;
-			this.containerEl.scrollTo({ top: anchorTop, behavior: "smooth" });
+			this.containerEl.scrollTo({ top: Math.max(0, anchorTop), behavior: "smooth" });
 			// Engage auto-follow after the smooth scroll has completed
 			// so it doesn't fight the animation. 700ms is a comfortable
 			// budget for the browser's smooth scroll on any viewport.

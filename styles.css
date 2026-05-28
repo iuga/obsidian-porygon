@@ -62,6 +62,7 @@
 .porygon-message-row.is-porygon,
 .porygon-message-row.is-warning {
 	justify-content: flex-start;
+	margin-bottom: 20px;
 }
 
 .porygon-message-stack {
