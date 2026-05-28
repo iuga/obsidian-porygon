@@ -1,6 +1,6 @@
 import { App, debounce, Debouncer, getFrontMatterInfo, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
-import summarizerSkill from "../skills/summarizer.md";
-import explainerSkill from "../skills/explainer.md";
+import summarizerSkill from "../../skills/summarizer.md";
+import explainerSkill from "../../skills/explainer.md";
 
 export interface AgentSkill {
 	name: string;

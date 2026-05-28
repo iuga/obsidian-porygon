@@ -6,8 +6,8 @@ import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { PorygonSettingTab } from "./settings-tab";
 import { sanitizeMemories } from "./memories";
-import { SkillsService } from "./skills";
-import { resetAgent } from "./agent";
+import { SkillsService } from "./agent/skills";
+import { resetAgent } from "./agent/agent";
 
 export default class PorygonPlugin extends Plugin {
 	settings: PorygonPluginSettings;

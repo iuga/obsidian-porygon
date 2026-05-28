@@ -1,7 +1,7 @@
 import { getFrontMatterInfo, ItemView, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
+import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
-import { OllamaHttpClient, OllamaModel } from "./ollama-client";
+import { OllamaHttpClient, OllamaModel } from "./agent/ollama-client";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings";
 import { ChatList } from "./chat/ChatList";
 import { ChatMessage, ChatRole, MentionedFile, MentionedItem, MentionType } from "./chat/types";

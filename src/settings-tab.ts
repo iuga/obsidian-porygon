@@ -1,6 +1,6 @@
 import { debounce, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "./main";
-import { OllamaHttpClient } from "./ollama-client";
+import { OllamaHttpClient } from "./agent/ollama-client";
 import { RagIndexProgress } from "./rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
 

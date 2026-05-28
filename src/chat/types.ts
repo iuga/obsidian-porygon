@@ -1,4 +1,4 @@
-import { AgentToolCallIntent } from "../agent";
+import { AgentToolCallIntent } from "../agent/agent";
 
 export type ChatRole = "user" | "porygon" | "warning" | "file";
 export type MentionType = "note" | "folder" | "active-note";
