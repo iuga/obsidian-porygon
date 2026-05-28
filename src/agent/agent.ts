@@ -1,11 +1,11 @@
-import { AIMessageChunk, BaseMessage, BaseMessageLike } from "@langchain/core/messages";
+import { AIMessageChunk, BaseMessage, BaseMessageLike, SystemMessage } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { ChatOllama } from "@langchain/ollama";
 import { App, Platform } from "obsidian";
-import { createAgent } from "langchain";
-import defaultSystemPrompt from "../prompts/system.md";
-import { RagIndexProgress, RagSemanticSearchService } from "./rag";
+import { createAgent, dynamicSystemPromptMiddleware } from "langchain";
+import defaultSystemPrompt from "../../prompts/system.md";
+import { RagIndexProgress, RagSemanticSearchService } from "../rag";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
 import { buildMemoryPromptBlock, MemoriesStore } from "./memories";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
@@ -13,6 +13,17 @@ import { AskUserInterruptPayload, createAgentTools } from "./tools";
 export type { AskUserInterruptPayload };
 
 const agentCheckpointer = new MemorySaver();
+
+// One agent for the whole plugin lifetime. The system prompt is the only
+// thing that varies per send (datetime, memories, skills, personal prompt)
+// so it's injected via a mutable ref read by dynamicSystemPromptMiddleware.
+// Call resetAgent() if the user changes host/model/thinking in settings.
+let agent: ReturnType<typeof createAgent> | null = null;
+const currentSystemPrompt = { value: "" };
+
+export function resetAgent(): void {
+	agent = null;
+}
 
 export async function clearAgentMemory(sessionId: string): Promise<void> {
 	try {
@@ -80,18 +91,24 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const contextPrompt = buildContextPromptBlock();
 	const memoryPrompt = buildMemoryPromptBlock(options.memoriesStore.get());
 	const personalPrompt = options.personalPrompt.trim();
-	const systemPrompt = [defaultPrompt, skillsPrompt, contextPrompt, memoryPrompt, personalPrompt].filter(Boolean).join("\n\n");
-	const agent = createAgent({
-		model: new ChatOllama({
-			baseUrl: options.ollamaHost,
-			model: options.ollamaChatModel,
-			think: options.ollamaThinking,
-			maxRetries: 0,
-		}),
-		tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
-		systemPrompt,
-		checkpointer: agentCheckpointer,
-	});
+	currentSystemPrompt.value = [defaultPrompt, skillsPrompt, contextPrompt, memoryPrompt, personalPrompt].filter(Boolean).join("\n\n");
+
+	if (!agent) {
+		agent = createAgent({
+			model: new ChatOllama({
+				baseUrl: options.ollamaHost,
+				model: options.ollamaChatModel,
+				think: options.ollamaThinking,
+				maxRetries: 0,
+			}),
+			tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
+			middleware: [
+				dynamicSystemPromptMiddleware(() => new SystemMessage(currentSystemPrompt.value)),
+			],
+			checkpointer: agentCheckpointer,
+		});
+	}
+	const activeAgent = agent;
 
 	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
 	const turnMessages = options.messages.map(toLangChainMessage);
@@ -104,7 +121,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 
 	let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
 	for (let cycle = 0; cycle < MAX_INTERRUPT_RESUME_CYCLES; cycle += 1) {
-		const stream = await agent.stream(nextInput, config);
+		const stream = await activeAgent.stream(nextInput, config);
 		for await (const chunk of stream) {
 			if (!Array.isArray(chunk)) {
 				continue;
@@ -136,7 +153,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			}
 		}
 
-		const askPayloads = await getPendingAskUserPayloads(agent, config);
+		const askPayloads = await getPendingAskUserPayloads(activeAgent, config);
 		if (askPayloads.length === 0) {
 			return { content, thinking, toolIntents };
 		}

@@ -1,12 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
-import { PorygonView, PORYGON_VIEW_TYPE } from "./porygon-view";
+import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
-import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings";
-import { PorygonSettingTab } from "./settings-tab";
-import { sanitizeMemories } from "./memories";
-import { SkillsService } from "./skills";
+import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
+import { PorygonSettingTab } from "./settings/settings-tab";
+import { sanitizeMemories } from "./agent/memories";
+import { SkillsService } from "./agent/skills";
+import { resetAgent } from "./agent/agent";
 
 export default class PorygonPlugin extends Plugin {
 	settings: PorygonPluginSettings;
@@ -84,6 +85,9 @@ export default class PorygonPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.ragIndexer.updateSettings(this.settings);
 		this.ragSemanticSearch.updateSettings(this.settings);
+		// Settings may have changed host/model/thinking; drop the cached agent
+		// so the next send rebuilds it with the new config.
+		resetAgent();
 	}
 
 	private registerSkillEvents(): void {

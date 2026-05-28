@@ -1,8 +1,10 @@
-import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AgentToolCallIntent, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent";
+import { getFrontMatterInfo, ItemView, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
-import { OllamaHttpClient, OllamaModel } from "./ollama-client";
-import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings";
+import { OllamaHttpClient, OllamaModel } from "./agent/ollama-client";
+import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
+import { ChatList } from "./chat/chat-list";
+import { ChatMessage, ChatRole, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 
@@ -21,20 +23,8 @@ interface SettingStep {
 	hint: SettingStepHint;
 }
 
-type ChatRole = "user" | "porygon" | "warning" | "file";
-type MentionType = "note" | "folder" | "active-note";
-
-interface MentionedItem {
-	type: MentionType;
-	path: string;
-	basename: string;
-	files: MentionedFile[];
-}
-
-interface MentionedFile {
-	path: string;
-	basename: string;
-}
+// Chat types (ChatMessage, ChatRole, MentionedItem, MentionedFile, MentionType)
+// live in ./chat/types so MessageRow / ChatList can reuse them.
 
 interface MentionSearchResult {
 	type: MentionType;
@@ -70,18 +60,6 @@ interface SessionMetadata {
 interface ParsedSession {
 	metadata: SessionMetadata;
 	messages: ChatMessage[];
-}
-
-interface ChatMessage {
-	role: ChatRole;
-	content: string;
-	createdAt?: string;
-	mentions?: MentionedItem[];
-	thinking?: string;
-	isThinkingCollapsed?: boolean;
-	thinkingDurationSeconds?: number;
-	toolIntents?: AgentToolCallIntent[];
-	areToolsCollapsed?: boolean;
 }
 
 const SETTING_STEPS: SettingStep[] = [
@@ -164,6 +142,12 @@ export class PorygonView extends ItemView {
 	private isStreaming = false;
 	private isCheckingHealth = false;
 	private isHealthy = true;
+	// Streaming bookkeeping. The actual rAF/render-then-swap state machine
+	// lives on the message's row inside ChatList; we just track which
+	// message is the current target so deltas can be routed there and
+	// finalizeStreaming() can drain it.
+	private streamingMessage: ChatMessage | null = null;
+	private chatList: ChatList | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PorygonPlugin) {
 		super(leaf);
@@ -193,6 +177,10 @@ export class PorygonView extends ItemView {
 
 	onClose(): Promise<void> {
 		this.closeAskUserPopover(true);
+		if (this.chatList) {
+			this.chatList.dispose();
+			this.chatList = null;
+		}
 		this.contentEl.empty();
 		return Promise.resolve();
 	}
@@ -277,19 +265,15 @@ export class PorygonView extends ItemView {
 		if (!this.chatHistoryEl) {
 			return;
 		}
-
-		this.chatHistoryEl.empty();
-		if (this.messages.length === 0) {
-			this.renderEmptyChatQuote();
-			return;
+		if (!this.chatList) {
+			this.chatList = new ChatList(this.chatHistoryEl, {
+				app: this.plugin.app,
+				component: this,
+				showToolUsage: () => this.plugin.settings.showToolUsage,
+			});
 		}
-
-		this.messages.forEach((message) => this.renderMessage(message));
-		this.scrollChatToBottom();
-	}
-
-	private renderEmptyChatQuote(): void {
-		this.chatHistoryEl?.createDiv({ cls: "porygon-empty-chat-quote", text: this.getDailyEmptyChatQuote() });
+		const emptyQuote = this.messages.length === 0 ? this.getDailyEmptyChatQuote() : undefined;
+		this.chatList.setMessages(this.messages, emptyQuote);
 	}
 
 	private getDailyEmptyChatQuote(): string {
@@ -300,93 +284,6 @@ export class PorygonView extends ItemView {
 
 	private hashString(value: string): number {
 		return [...value].reduce((hash, character) => ((hash << 5) - hash + character.charCodeAt(0)) >>> 0, 0);
-	}
-
-	private renderMessage(message: ChatMessage): void {
-		if (!this.chatHistoryEl) {
-			return;
-		}
-
-		if (message.role === "warning") {
-			const row = this.chatHistoryEl.createDiv({ cls: "porygon-message-row is-warning" });
-			const warningEl = row.createDiv({ cls: "porygon-chat-warning" });
-			const iconEl = warningEl.createDiv({ cls: "porygon-chat-warning-icon" });
-			setIcon(iconEl, "triangle-alert");
-			warningEl.createDiv({ cls: "porygon-chat-warning-content", text: message.content });
-			return;
-		}
-
-		if (message.role === "file") {
-			return;
-		}
-
-		const row = this.chatHistoryEl.createDiv({ cls: `porygon-message-row is-${message.role}` });
-		const messageStack = row.createDiv({ cls: "porygon-message-stack" });
-		if (message.role === "user" && message.mentions && message.mentions.length > 0) {
-			const messageMentionTagsEl = messageStack.createDiv({ cls: "porygon-mention-tags" });
-			this.renderMentionTagList(messageMentionTagsEl, message.mentions, false);
-		}
-		if (message.role === "porygon" && message.thinking) {
-			this.renderThinkingBubble(messageStack, message);
-		}
-		if (this.plugin.settings.showToolUsage && message.role === "porygon" && message.toolIntents && message.toolIntents.length > 0) {
-			this.renderToolsBubble(messageStack, message);
-		}
-
-		if (message.role === "porygon" && !message.content) {
-			return;
-		}
-
-		const bubble = messageStack.createDiv({ cls: "porygon-message-bubble" });
-		const iconEl = bubble.createDiv({ cls: "porygon-message-icon" });
-		setIcon(iconEl, message.role === "user" ? "user" : "origami");
-		const contentEl = bubble.createDiv({ cls: "porygon-message-content" });
-		if (message.role === "porygon") {
-			contentEl.addClass("markdown-rendered");
-			void MarkdownRenderer.render(this.plugin.app, message.content, contentEl, "/", this);
-			return;
-		}
-
-		contentEl.setText(message.content);
-	}
-
-	private renderThinkingBubble(containerEl: HTMLElement, message: ChatMessage): void {
-		const details = containerEl.createEl("details", { cls: "porygon-thinking-bubble" });
-		details.open = !message.isThinkingCollapsed;
-		const summary = details.createEl("summary", { cls: "porygon-thinking-summary" });
-		const iconEl = summary.createSpan({ cls: "porygon-thinking-icon" });
-		setIcon(iconEl, "lightbulb");
-		summary.createSpan({ text: this.getThinkingTitle(message) });
-		summary.addEventListener("click", () => {
-			window.setTimeout(() => {
-				message.isThinkingCollapsed = !details.open;
-			}, 0);
-		});
-		const contentEl = details.createDiv({ cls: "porygon-thinking-content markdown-rendered" });
-		void MarkdownRenderer.render(this.plugin.app, message.thinking ?? "", contentEl, "/", this).then(() => {
-			if (details.open) {
-				contentEl.scrollTop = contentEl.scrollHeight;
-			}
-		});
-	}
-
-	private renderToolsBubble(containerEl: HTMLElement, message: ChatMessage): void {
-		const details = containerEl.createEl("details", { cls: "porygon-tools-bubble" });
-		details.open = !message.areToolsCollapsed;
-		const summary = details.createEl("summary", { cls: "porygon-tools-summary" });
-		const iconEl = summary.createSpan({ cls: "porygon-tools-icon" });
-		setIcon(iconEl, "wrench");
-		summary.createSpan({ text: this.getToolsTitle(message) });
-		summary.addEventListener("click", () => {
-			window.setTimeout(() => {
-				message.areToolsCollapsed = !details.open;
-			}, 0);
-		});
-		const listEl = details.createEl("ul", { cls: "porygon-tools-list" });
-		(message.toolIntents ?? []).forEach((toolIntent) => {
-			const itemEl = listEl.createEl("li", { cls: "porygon-tools-item" });
-			itemEl.createSpan({ cls: "porygon-tools-intent", text: toolIntent.intent });
-		});
 	}
 
 	private renderComposer(containerEl: HTMLElement): void {
@@ -1701,28 +1598,35 @@ export class PorygonView extends ItemView {
 			return;
 		}
 
-		this.isCheckingHealth = true;
-		this.updateSendButtonState();
-		const isOllamaReachable = await this.updateHealthStatus();
-		this.isCheckingHealth = false;
-		this.updateSendButtonState();
-		if (!isOllamaReachable) {
-			return;
-		}
+		// Don't gate the UI on the health check: showing "Connecting..." can take
+		// seconds if Ollama is slow to respond. We kick off the health check in
+		// the background to update the indicator; if Ollama is actually
+		// unreachable, the agent call below will fail and the catch branch
+		// surfaces the error as a warning bubble.
+		void this.updateHealthStatus();
 
 		const createdAt = new Date().toISOString();
 		this.composerInputEl.value = "";
 		this.selectedMentions = [];
 		this.renderMentionTags();
 		this.closeMentionPopover();
-		this.messages.push({ role: "user", content, createdAt, mentions: mentionSnapshots });
+		const userMessage: ChatMessage = { role: "user", content, createdAt, mentions: mentionSnapshots };
+		this.messages.push(userMessage);
 		const fileMessages = await this.createFileContextMessages(mentionSnapshots);
 		this.messages.push(...fileMessages);
-		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString() };
+		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString(), isStreaming: true };
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
+		this.streamingMessage = porygonMessage;
 		this.updateSendButtonState();
+		// One reconcile to mount the new user / file / porygon rows. All
+		// further per-delta work goes through ChatList.notifyStreamingDelta
+		// / notifyChanged and never touches historical rows.
 		this.renderMessages();
+		// Pin the user's message to the viewport top: the streamed reply
+		// then fills the empty space below; once it overflows, the list
+		// naturally follows the bottom.
+		this.chatList?.pinMessageToTop(userMessage);
 
 		if (!this.currentSessionId) {
 			this.currentSessionId = crypto.randomUUID();
@@ -1740,6 +1644,7 @@ export class PorygonView extends ItemView {
 				if (!hasStartedStreamingContent && hasPlaceholderContent) {
 					porygonMessage.content = "";
 					hasPlaceholderContent = false;
+					this.chatList?.notifyStreamingDelta(porygonMessage, "content");
 				}
 			};
 			await streamLocalAgent({
@@ -1766,20 +1671,23 @@ export class PorygonView extends ItemView {
 					clearPendingAnswerPlaceholder();
 					porygonMessage.toolIntents = [...(porygonMessage.toolIntents ?? []), toolIntent];
 					porygonMessage.areToolsCollapsed = false;
-					this.renderMessages();
+					// Structural: routed to this row only, not the whole list.
+					this.chatList?.notifyStreamingDelta(porygonMessage, "tool");
 				},
 				onContentDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
 					hasStartedStreamingContent = true;
 					porygonMessage.content += delta;
-					this.renderMessages();
+					this.chatList?.notifyStreamingDelta(porygonMessage, "content");
 				},
 				onThinkingDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
 					thinkingStartedAt = thinkingStartedAt ?? Date.now();
 					porygonMessage.thinking = `${porygonMessage.thinking ?? ""}${delta}`;
 					porygonMessage.isThinkingCollapsed = false;
-					this.renderMessages();
+					// Routed to this row only. MessageRow materializes the
+					// thinking <details> on the first delta automatically.
+					this.chatList?.notifyStreamingDelta(porygonMessage, "thinking");
 				},
 				onAskUser: (payload) => this.handleAskUser(payload),
 			});
@@ -1793,8 +1701,12 @@ export class PorygonView extends ItemView {
 			if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0) {
 				porygonMessage.areToolsCollapsed = true;
 			}
-			this.renderMessages();
+			await this.finalizeStreaming(porygonMessage);
+			// Single-row update to switch from "streaming" to "historical"
+			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
+			this.chatList?.notifyChanged(porygonMessage);
 		} catch (error) {
+			await this.finalizeStreaming(porygonMessage);
 			this.messages = this.messages.filter((message) => message !== porygonMessage);
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 			this.renderMessages();
@@ -1804,19 +1716,15 @@ export class PorygonView extends ItemView {
 		}
 	}
 
-	private getThinkingTitle(message: ChatMessage): string {
-		if (message.thinkingDurationSeconds === undefined) {
-			return "Connecting...";
+	// Sync-finalize: drain the row's in-flight rAF render so the post-turn
+	// notifyChanged() doesn't race a late delta, then flip isStreaming off.
+	// Mirrors open-webui's cancelAnimationFrame + sync parse on done.
+	private async finalizeStreaming(message: ChatMessage): Promise<void> {
+		if (this.chatList) {
+			await this.chatList.finalizeStreaming(message);
 		}
-
-		const unit = message.thinkingDurationSeconds === 1 ? "second" : "seconds";
-		return `Thought for ${message.thinkingDurationSeconds} ${unit}`;
-	}
-
-	private getToolsTitle(message: ChatMessage): string {
-		const toolCount = message.toolIntents?.length ?? 0;
-		const unit = toolCount === 1 ? "tool" : "tools";
-		return `${toolCount} ${unit} used`;
+		message.isStreaming = false;
+		this.streamingMessage = null;
 	}
 
 	private getThinkingDurationSeconds(startedAt: number): number {
@@ -2052,6 +1960,10 @@ export class PorygonView extends ItemView {
 			this.closeSlashCommandPopover();
 			this.updateSendButtonState();
 			this.renderMessages();
+			const lastUserMessage = [...this.messages].reverse().find((m) => m.role === "user");
+			if (lastUserMessage) {
+				this.chatList?.pinMessageToTop(lastUserMessage);
+			}
 			this.composerInputEl?.focus();
 		} catch (error) {
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
@@ -2195,14 +2107,6 @@ export class PorygonView extends ItemView {
 		}
 
 		return "sticky-note";
-	}
-
-	private scrollChatToBottom(): void {
-		if (!this.chatHistoryEl) {
-			return;
-		}
-
-		this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
 	}
 
 	private async updateHealthStatus(): Promise<boolean> {

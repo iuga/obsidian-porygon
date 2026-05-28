@@ -1,5 +1,5 @@
 import { OllamaEmbeddings } from "@langchain/ollama";
-import { PorygonPluginSettings } from "../settings";
+import { PorygonPluginSettings } from "../settings/settings";
 import { arrayBufferToFloat32Array, RagIndexedDbStore } from "./indexeddb-store";
 import { RagSemanticSearchOptions, RagSemanticSearchResult } from "./types";
 

@@ -1,7 +1,7 @@
 import { OllamaEmbeddings } from "@langchain/ollama";
 import { App, TFile } from "obsidian";
 import picomatch from "picomatch";
-import { PorygonPluginSettings } from "../settings";
+import { PorygonPluginSettings } from "../settings/settings";
 import { buildMarkdownChunks } from "./chunks";
 import { float32ArrayToArrayBuffer, RagIndexedDbStore } from "./indexeddb-store";
 import { RagChunkRecord, RagFileRecord, RagIndexProgress, RagVectorRecord } from "./types";

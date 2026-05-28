@@ -1,6 +1,6 @@
 import { App, debounce, Debouncer, getFrontMatterInfo, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
-import summarizerSkill from "../skills/summarizer.md";
-import explainerSkill from "../skills/explainer.md";
+import summarizerSkill from "../../skills/summarizer.md";
+import explainerSkill from "../../skills/explainer.md";
 
 export interface AgentSkill {
 	name: string;
@@ -50,7 +50,6 @@ export class SkillsService {
 
 	async refresh(): Promise<void> {
 		this.skills = await discoverSkills(this.app);
-		console.debug("[Porygon Skills] refreshed", { count: this.skills.length, skills: this.skills.map((skill) => skill.location) });
 	}
 
 	refreshIfManaged(file: TAbstractFile, oldPath?: string): void {
