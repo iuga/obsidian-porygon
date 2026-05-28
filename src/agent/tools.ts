@@ -19,7 +19,7 @@ export type ApprovalDecision =
 const APPROVE_LABEL = "Approve";
 const DENY_LABEL = "Deny";
 // Reserved labels above must stay in sync with the popover UI in
-// porygon-view.ts (Approve/Deny buttons). Any other reply is treated as
+// view.ts (Approve/Deny buttons). Any other reply is treated as
 // `deny_with_feedback` so the agent gets the user's free-form rationale.
 
 function requestApproval(question: string, getYolo: () => boolean): ApprovalDecision {
