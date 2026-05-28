@@ -34,6 +34,8 @@ export class MessageRow {
 	private renderedThinkingTitle = "";
 	private renderedToolsTitle = "";
 	private renderedIsStreaming = false;
+	private renderedThinkingCollapsed: boolean | null = null;
+	private renderedToolsCollapsed: boolean | null = null;
 
 	// Bubble element refs (created on demand, kept across updates).
 	private thinkingDetailsEl: HTMLDetailsElement | null = null;
@@ -197,6 +199,7 @@ export class MessageRow {
 				this.thinkingTitleEl = null;
 				this.thinkingContentEl = null;
 				this.renderedThinking = null;
+				this.renderedThinkingCollapsed = null;
 				this.historicalThinkingMaterialized = false;
 			}
 			return;
@@ -209,6 +212,14 @@ export class MessageRow {
 
 		if (!this.thinkingDetailsEl) {
 			this.buildThinkingBubble(message);
+		}
+
+		// Sync collapsed state from message flags (set by view.ts at
+		// end-of-turn) so completed responses auto-collapse the bubble.
+		const collapsed = !!message.isThinkingCollapsed;
+		if (this.thinkingDetailsEl && this.renderedThinkingCollapsed !== collapsed) {
+			this.thinkingDetailsEl.open = !collapsed;
+			this.renderedThinkingCollapsed = collapsed;
 		}
 
 		if (this.thinkingTitleEl && (forceFull || title !== this.renderedThinkingTitle)) {
@@ -250,6 +261,7 @@ export class MessageRow {
 		summary.addEventListener("click", () => {
 			window.setTimeout(() => {
 				message.isThinkingCollapsed = !details.open;
+				this.renderedThinkingCollapsed = !details.open;
 			}, 0);
 		});
 		const contentEl = details.createDiv({ cls: "porygon-thinking-content markdown-rendered" });
@@ -301,6 +313,7 @@ export class MessageRow {
 				this.toolsTitleEl = null;
 				this.toolsListEl = null;
 				this.renderedToolCount = 0;
+				this.renderedToolsCollapsed = null;
 			}
 			return;
 		}
@@ -310,6 +323,12 @@ export class MessageRow {
 
 		if (!this.toolsDetailsEl) {
 			this.buildToolsBubble(message);
+		}
+
+		const collapsed = !!message.areToolsCollapsed;
+		if (this.toolsDetailsEl && this.renderedToolsCollapsed !== collapsed) {
+			this.toolsDetailsEl.open = !collapsed;
+			this.renderedToolsCollapsed = collapsed;
 		}
 		if (this.toolsTitleEl && (forceFull || title !== this.renderedToolsTitle)) {
 			this.toolsTitleEl.setText(title);
@@ -344,6 +363,7 @@ export class MessageRow {
 		summary.addEventListener("click", () => {
 			window.setTimeout(() => {
 				message.areToolsCollapsed = !details.open;
+				this.renderedToolsCollapsed = !details.open;
 			}, 0);
 		});
 		const listEl = details.createEl("ul", { cls: "porygon-tools-list" });

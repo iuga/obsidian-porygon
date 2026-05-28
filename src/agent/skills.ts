@@ -50,7 +50,6 @@ export class SkillsService {
 
 	async refresh(): Promise<void> {
 		this.skills = await discoverSkills(this.app);
-		console.debug("[Porygon Skills] refreshed", { count: this.skills.length, skills: this.skills.map((skill) => skill.location) });
 	}
 
 	refreshIfManaged(file: TAbstractFile, oldPath?: string): void {

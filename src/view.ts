@@ -274,9 +274,6 @@ export class PorygonView extends ItemView {
 		}
 		const emptyQuote = this.messages.length === 0 ? this.getDailyEmptyChatQuote() : undefined;
 		this.chatList.setMessages(this.messages, emptyQuote);
-		if (this.messages.length > 0) {
-			this.scrollChatToBottom();
-		}
 	}
 
 	private getDailyEmptyChatQuote(): string {
@@ -1613,7 +1610,8 @@ export class PorygonView extends ItemView {
 		this.selectedMentions = [];
 		this.renderMentionTags();
 		this.closeMentionPopover();
-		this.messages.push({ role: "user", content, createdAt, mentions: mentionSnapshots });
+		const userMessage: ChatMessage = { role: "user", content, createdAt, mentions: mentionSnapshots };
+		this.messages.push(userMessage);
 		const fileMessages = await this.createFileContextMessages(mentionSnapshots);
 		this.messages.push(...fileMessages);
 		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString(), isStreaming: true };
@@ -1625,6 +1623,10 @@ export class PorygonView extends ItemView {
 		// further per-delta work goes through ChatList.notifyStreamingDelta
 		// / notifyChanged and never touches historical rows.
 		this.renderMessages();
+		// Pin the user's message to the viewport top: the streamed reply
+		// then fills the empty space below; once it overflows, the list
+		// naturally follows the bottom.
+		this.chatList?.pinMessageToTop(userMessage);
 
 		if (!this.currentSessionId) {
 			this.currentSessionId = crypto.randomUUID();
@@ -1958,6 +1960,10 @@ export class PorygonView extends ItemView {
 			this.closeSlashCommandPopover();
 			this.updateSendButtonState();
 			this.renderMessages();
+			const lastUserMessage = [...this.messages].reverse().find((m) => m.role === "user");
+			if (lastUserMessage) {
+				this.chatList?.pinMessageToTop(lastUserMessage);
+			}
 			this.composerInputEl?.focus();
 		} catch (error) {
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
@@ -2101,14 +2107,6 @@ export class PorygonView extends ItemView {
 		}
 
 		return "sticky-note";
-	}
-
-	private scrollChatToBottom(): void {
-		if (!this.chatHistoryEl) {
-			return;
-		}
-
-		this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
 	}
 
 	private async updateHealthStatus(): Promise<boolean> {
