@@ -9,151 +9,106 @@ interface ChatListDeps {
 }
 
 const EMPTY_QUOTE_CLASS = "porygon-empty-chat-quote";
+const ANCHORED_CLASS = "is-anchored";
 
 /**
  * Owns chatHistoryEl and a Map<ChatMessage, MessageRow>. setMessages()
  * reconciles the list by object identity: existing rows are reused (no
  * markdown re-render), missing rows are unmounted, new rows are mounted.
  *
- * This is the core fix for "every event re-renders the whole conversation":
- * historical rows are never torn down. Only the row whose message changed
- * sees any DOM work, and a streaming row routes all its delta work through
- * its own per-row rAF state machine.
+ * Scroll behaviour follows the ChatGPT pattern:
+ *   - The container has `overflow-anchor: auto` and a monotonic bottom
+ *     buffer (a virtual ::after flex item the size of one viewport).
+ *     The buffer is added on first send and never removed; the
+ *     scrollable height stays stable across the whole session and
+ *     makes "user message at top of viewport" always reachable.
+ *   - On send we perform exactly one smooth scroll that aligns the new
+ *     user message to the top of the viewport.
+ *   - As streamed content grows, we bottom-follow: if the user hasn't
+ *     scrolled away from the bottom of the real content, we snap
+ *     scrollTop to keep the latest tokens visible. The buffer keeps a
+ *     full viewport of room available below.
+ *   - Any user scroll cancels the auto-follow until the next send.
  */
 export class ChatList {
 	private containerEl: HTMLElement;
 	private deps: ChatListDeps;
 	private rows = new Map<ChatMessage, MessageRow>();
 	private emptyEl: HTMLElement | null = null;
-	private spacerEl: HTMLElement | null = null;
 	private resizeObserver: ResizeObserver | null = null;
 
-	// Scroll model:
-	// - When a message is pinned, scrollTop = max(anchor.offsetTop, bottom).
-	//   Initially the anchor sits at the viewport top with empty space below;
-	//   as the streamed reply grows, the bottom eventually exceeds the
-	//   anchor's top and we naturally start following the bottom.
-	// - stickToBottom is the no-anchor fallback so that when content grows
-	//   while the user is already at the bottom (e.g. after the pin has been
-	//   superseded by bottom-follow) we keep them pinned.
-	// - Any user-initiated scroll disengages both.
-	private anchorEl: HTMLElement | null = null;
-	private stickToBottom = true;
-	private pendingProgrammaticScrolls = 0;
+	// Bottom-follow state. Engaged once the initial smooth scroll on
+	// pinMessageToTop has parked us at the top of the new user message;
+	// any user-initiated scroll drops it.
+	private autoFollow = false;
+	private autoFollowEnableTimer: number | null = null;
+	private programmaticScrollPending = 0;
+
 	private onScroll = (): void => {
-		if (this.pendingProgrammaticScrolls > 0) {
-			this.pendingProgrammaticScrolls -= 1;
+		if (this.programmaticScrollPending > 0) {
+			this.programmaticScrollPending -= 1;
 			return;
 		}
-		this.anchorEl = null;
-		this.stickToBottom = this.isAtBottom();
+		this.autoFollow = false;
 	};
 
 	constructor(containerEl: HTMLElement, deps: ChatListDeps) {
 		this.containerEl = containerEl;
 		this.deps = deps;
 		this.containerEl.addEventListener("scroll", this.onScroll, { passive: true });
-		// Observe each row so growth from markdown render / streaming
-		// deltas triggers applyScroll. A single observer on the container
-		// does NOT fire when descendants change size, only when the
-		// container's own box changes.
 		this.resizeObserver = new ResizeObserver(() => {
-			this.applyScroll();
+			this.followBottomIfNeeded();
 		});
 		this.resizeObserver.observe(this.containerEl);
 	}
 
-	private isAtBottom(): boolean {
-		// 4px slack absorbs sub-pixel rounding from zoom/devicePixelRatio.
-		const distance = this.containerEl.scrollHeight - this.containerEl.clientHeight - this.containerEl.scrollTop;
-		return distance <= 4;
+	private getContentBottom(): number {
+		// The real content bottom = scrollHeight minus the trailing
+		// virtual buffer. We model the buffer as one clientHeight set
+		// by --porygon-chat-buffer.
+		const styles = window.getComputedStyle(this.containerEl);
+		const buffer = parseFloat(styles.getPropertyValue("--porygon-chat-buffer")) || 0;
+		return this.containerEl.scrollHeight - buffer;
 	}
 
-	private setScrollTop(value: number): void {
-		const clamped = Math.max(0, Math.min(value, this.containerEl.scrollHeight - this.containerEl.clientHeight));
-		if (Math.abs(this.containerEl.scrollTop - clamped) < 0.5) return;
-		this.pendingProgrammaticScrolls += 1;
-		this.containerEl.scrollTop = clamped;
-	}
-
-	private getAnchorOffsetTop(): number {
-		if (!this.anchorEl) return 0;
-		// getBoundingClientRect + current scrollTop gives the row's offset
-		// inside the scroll content regardless of offsetParent chain
-		// (offsetTop can be wrong when an ancestor is the offsetParent).
-		return this.anchorEl.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top + this.containerEl.scrollTop;
-	}
-
-	private applyScroll(): void {
-		if (this.anchorEl) {
-			if (!this.anchorEl.isConnected) {
-				this.anchorEl = null;
-				this.updateSpacer();
-				return;
-			}
-			this.updateSpacer();
-			const anchorTop = this.getAnchorOffsetTop();
-			const bottom = this.containerEl.scrollHeight - this.containerEl.clientHeight;
-			this.setScrollTop(Math.max(0, Math.min(anchorTop, bottom)));
-			return;
-		}
-		this.updateSpacer();
-		if (this.stickToBottom) {
-			this.setScrollTop(this.containerEl.scrollHeight);
-		}
-	}
-
-	// While anchored, add bottom padding so the anchor row can actually
-	// reach the top of the viewport even when there is very little content
-	// after it (e.g. just the "Connecting..." placeholder). The padding
-	// shrinks as real content fills in and disappears once the anchor is
-	// dropped.
-	private ensureSpacer(): HTMLElement {
-		if (!this.spacerEl) {
-			this.spacerEl = this.containerEl.createDiv({ cls: "porygon-chat-bottom-spacer" });
-		}
-		if (this.spacerEl.parentElement !== this.containerEl || this.spacerEl !== this.containerEl.lastChild) {
-			this.containerEl.appendChild(this.spacerEl);
-		}
-		return this.spacerEl;
-	}
-
-	private updateSpacer(): void {
-		if (!this.anchorEl) {
-			if (this.spacerEl) {
-				this.spacerEl.remove();
-				this.spacerEl = null;
-			}
-			return;
-		}
-		const spacer = this.ensureSpacer();
-		// One full viewport of bottom padding while pinned. This guarantees
-		// there is always enough scrollable room for scrollTop = anchorTop
-		// to actually land the anchor at the top of the viewport, even when
-		// the streamed reply is still just "Connecting...". The spacer is
-		// removed entirely when the anchor is dropped.
-		const target = this.containerEl.clientHeight;
-		if (Math.abs(target - spacer.offsetHeight) >= 1) {
-			spacer.style.height = `${target}px`;
-		}
+	private followBottomIfNeeded(): void {
+		if (!this.autoFollow) return;
+		const contentBottom = this.getContentBottom();
+		const target = contentBottom - this.containerEl.clientHeight;
+		if (target <= this.containerEl.scrollTop + 0.5) return;
+		this.programmaticScrollPending += 1;
+		this.containerEl.scrollTop = target;
 	}
 
 	/**
-	 * Pin the given message to the top of the viewport. As subsequent
-	 * content grows, the row stays anchored until the bottom of the
-	 * content overtakes the anchor's top, after which we follow the
-	 * bottom. Any user scroll cancels the anchor.
+	 * Smooth-scroll the given message to the top of the viewport. Adds
+	 * the monotonic bottom buffer on first call so the scroll target is
+	 * always reachable, then engages auto-follow once the animation
+	 * window closes. Called once per user send.
 	 */
 	pinMessageToTop(message: ChatMessage): void {
 		const row = this.rows.get(message);
 		if (!row) return;
-		this.anchorEl = row.el;
-		this.stickToBottom = false;
-		// Apply now (layout is usually ready after the synchronous
-		// setMessages above) and again next frame in case the row's
-		// content height changes after a follow-up async render.
-		this.applyScroll();
-		requestAnimationFrame(() => this.applyScroll());
+		this.containerEl.style.setProperty("--porygon-chat-buffer", `${this.containerEl.clientHeight}px`);
+		this.containerEl.addClass(ANCHORED_CLASS);
+		this.autoFollow = false;
+		if (this.autoFollowEnableTimer !== null) {
+			window.clearTimeout(this.autoFollowEnableTimer);
+		}
+		requestAnimationFrame(() => {
+			if (!row.el.isConnected) return;
+			const anchorTop = row.el.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top + this.containerEl.scrollTop;
+			this.programmaticScrollPending += 1;
+			this.containerEl.scrollTo({ top: anchorTop, behavior: "smooth" });
+			// Engage auto-follow after the smooth scroll has completed
+			// so it doesn't fight the animation. 700ms is a comfortable
+			// budget for the browser's smooth scroll on any viewport.
+			this.autoFollowEnableTimer = window.setTimeout(() => {
+				this.autoFollowEnableTimer = null;
+				this.autoFollow = true;
+				this.followBottomIfNeeded();
+			}, 700);
+		});
 	}
 
 	/**
@@ -190,9 +145,6 @@ export class ChatList {
 				row.update(message);
 			}
 
-			// Move the row into position if it isn't already there. This
-			// is a no-op when DOM order matches state order (the common case),
-			// so we never thrash the layout on every render.
 			if (cursor !== row.el) {
 				this.containerEl.insertBefore(row.el, cursor);
 			} else {
@@ -213,10 +165,6 @@ export class ChatList {
 		if (this.rows.size === 0 && emptyQuote !== undefined) {
 			this.emptyEl = this.containerEl.createDiv({ cls: EMPTY_QUOTE_CLASS, text: emptyQuote });
 		}
-
-		// Re-apply scroll: new rows may have shifted the anchor's offsetTop,
-		// and the spacer needs to be re-evaluated against the new content.
-		this.applyScroll();
 	}
 
 	/**
@@ -255,6 +203,10 @@ export class ChatList {
 	}
 
 	dispose(): void {
+		if (this.autoFollowEnableTimer !== null) {
+			window.clearTimeout(this.autoFollowEnableTimer);
+			this.autoFollowEnableTimer = null;
+		}
 		this.containerEl.removeEventListener("scroll", this.onScroll);
 		this.resizeObserver?.disconnect();
 		this.resizeObserver = null;
@@ -266,5 +218,7 @@ export class ChatList {
 			this.emptyEl.remove();
 			this.emptyEl = null;
 		}
+		this.containerEl.removeClass(ANCHORED_CLASS);
+		this.containerEl.style.removeProperty("--porygon-chat-buffer");
 	}
 }

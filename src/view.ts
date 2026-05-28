@@ -1640,6 +1640,24 @@ export class PorygonView extends ItemView {
 			let thinkingStartedAt: number | null = null;
 			let hasStartedStreamingContent = false;
 			let hasPlaceholderContent = true;
+			const collapseThinkingAndTools = () => {
+				// Collapse thinking + tools as soon as the answer starts
+				// streaming so the user's focus shifts to the answer. The
+				// notifyChanged() call rerenders this row only.
+				let changed = false;
+				if (porygonMessage.thinking && !porygonMessage.isThinkingCollapsed) {
+					porygonMessage.isThinkingCollapsed = true;
+					if (thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
+						porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
+					}
+					changed = true;
+				}
+				if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0 && !porygonMessage.areToolsCollapsed) {
+					porygonMessage.areToolsCollapsed = true;
+					changed = true;
+				}
+				if (changed) this.chatList?.notifyChanged(porygonMessage);
+			};
 			const clearPendingAnswerPlaceholder = () => {
 				if (!hasStartedStreamingContent && hasPlaceholderContent) {
 					porygonMessage.content = "";
@@ -1676,6 +1694,7 @@ export class PorygonView extends ItemView {
 				},
 				onContentDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
+					if (!hasStartedStreamingContent) collapseThinkingAndTools();
 					hasStartedStreamingContent = true;
 					porygonMessage.content += delta;
 					this.chatList?.notifyStreamingDelta(porygonMessage, "content");
@@ -1694,12 +1713,8 @@ export class PorygonView extends ItemView {
 
 			this.isSessionMemoryPrimed = true;
 
-			if (porygonMessage.thinking && thinkingStartedAt !== null) {
+			if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
 				porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
-				porygonMessage.isThinkingCollapsed = true;
-			}
-			if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0) {
-				porygonMessage.areToolsCollapsed = true;
 			}
 			await this.finalizeStreaming(porygonMessage);
 			// Single-row update to switch from "streaming" to "historical"

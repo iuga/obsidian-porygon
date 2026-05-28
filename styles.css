@@ -18,9 +18,26 @@
 	flex-direction: column;
 	gap: var(--size-4-4);
 	overflow-y: auto;
+	overflow-anchor: auto;
+	scrollbar-gutter: stable;
 	padding: var(--size-4-4);
 	-webkit-user-select: text;
 	user-select: text;
+}
+
+/*
+ * Monotonic bottom buffer (ChatGPT pattern): once the user starts a
+ * conversation we add a virtual flex item below the messages so the
+ * scroll container always has at least one viewport of room below its
+ * content. This lets a newly pinned message sit at the top of the
+ * viewport. Using ::after instead of padding-bottom avoids growing the
+ * chat-history element's own box, which would push the composer down.
+ */
+.porygon-chat-history.is-anchored::after {
+	content: "";
+	flex: 0 0 auto;
+	display: block;
+	height: var(--porygon-chat-buffer, 100vh);
 }
 
 .porygon-empty-chat-quote {
@@ -168,11 +185,8 @@
 }
 
 .porygon-thinking-content {
-	max-height: calc(5 * var(--line-height-normal) * 1em);
-	overflow-y: auto;
 	margin-top: var(--size-4-2);
 	word-break: break-word;
-	scroll-behavior: auto;
 	-webkit-user-select: text;
 	user-select: text;
 }
