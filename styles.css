@@ -279,8 +279,11 @@
 	padding: var(--size-4-2);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-l);
-	box-shadow: 0 0 0 1px var(--interactive-accent);
 	background: var(--background-primary);
+}
+
+.porygon-composer:focus-within {
+	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .porygon-composer.is-unhealthy {
