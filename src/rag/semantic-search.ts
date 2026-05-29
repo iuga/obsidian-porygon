@@ -1,4 +1,5 @@
-import { OllamaEmbeddings } from "@langchain/ollama";
+import type { Embeddings } from "@langchain/core/embeddings";
+import { getActiveProvider, getEmbeddings } from "../providers";
 import { PorygonPluginSettings } from "../settings/settings";
 import { arrayBufferToFloat32Array, RagIndexedDbStore } from "./indexeddb-store";
 import { RagSemanticSearchOptions, RagSemanticSearchResult } from "./types";
@@ -8,34 +9,23 @@ export const DEFAULT_SEMANTIC_SEARCH_LIMIT = 8;
 export class RagSemanticSearchService {
 	private settings: PorygonPluginSettings;
 	private store: RagIndexedDbStore;
-	private cachedEmbeddings: { host: string; model: string; client: OllamaEmbeddings } | null = null;
-	private watchedHost = "";
-	private watchedEmbeddingModel = "";
 
 	constructor(settings: PorygonPluginSettings, store: RagIndexedDbStore) {
 		this.settings = settings;
 		this.store = store;
-		this.watchedHost = settings.ollamaHost;
-		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
-		if (this.watchedHost !== settings.ollamaHost || this.watchedEmbeddingModel !== settings.ollamaEmbeddingModel) {
-			this.cachedEmbeddings = null;
-		}
-		this.watchedHost = settings.ollamaHost;
-		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
 		this.settings = settings;
 	}
 
 	async search(options: RagSemanticSearchOptions): Promise<RagSemanticSearchResult[]> {
 		const query = options.query.trim();
 		const limit = Math.max(1, options.limit ?? DEFAULT_SEMANTIC_SEARCH_LIMIT);
-		if (!query || !this.settings.ollamaHost || !this.settings.ollamaEmbeddingModel) {
+		if (!query || !getActiveProvider(this.settings).isConfigured(this.settings)) {
 			console.debug("[Porygon RAG] semantic search skipped", {
 				query,
-				hasOllamaHost: Boolean(this.settings.ollamaHost),
-				hasEmbeddingModel: Boolean(this.settings.ollamaEmbeddingModel),
+				isConfigured: getActiveProvider(this.settings).isConfigured(this.settings),
 			});
 			return [];
 		}
@@ -97,17 +87,8 @@ export class RagSemanticSearchService {
 		return results;
 	}
 
-	private getEmbeddingsClient(): OllamaEmbeddings {
-		const host = this.settings.ollamaHost;
-		const model = this.settings.ollamaEmbeddingModel;
-		if (!this.cachedEmbeddings || this.cachedEmbeddings.host !== host || this.cachedEmbeddings.model !== model) {
-			this.cachedEmbeddings = {
-				host,
-				model,
-				client: new OllamaEmbeddings({ baseUrl: host, model }),
-			};
-		}
-		return this.cachedEmbeddings.client;
+	private getEmbeddingsClient(): Embeddings {
+		return getEmbeddings(this.settings);
 	}
 }
 

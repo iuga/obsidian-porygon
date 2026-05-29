@@ -1,6 +1,7 @@
-import { OllamaEmbeddings } from "@langchain/ollama";
+import type { Embeddings } from "@langchain/core/embeddings";
 import { App, TFile } from "obsidian";
 import picomatch from "picomatch";
+import { getActiveProvider, getEmbeddings } from "../providers";
 import { PorygonPluginSettings } from "../settings/settings";
 import { buildMarkdownChunks } from "./chunks";
 import { float32ArrayToArrayBuffer, RagIndexedDbStore } from "./indexeddb-store";
@@ -26,11 +27,9 @@ export class RagIndexer {
 	private isRunning = false;
 	private isReconciling = false;
 	private disposed = false;
-	private cachedEmbeddings: { host: string; model: string; client: OllamaEmbeddings } | null = null;
 	private ignoreMatcher: IgnoreMatcher;
 	private ignoreSource = "";
-	private watchedHost = "";
-	private watchedEmbeddingModel = "";
+	private watchedFingerprint = "";
 	private progress: RagIndexProgress = {
 		status: "idle",
 		indexedFiles: 0,
@@ -47,8 +46,7 @@ export class RagIndexer {
 		this.store = store;
 		this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
 		this.ignoreSource = settings.ragIgnoredPaths;
-		this.watchedHost = settings.ollamaHost;
-		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
+		this.watchedFingerprint = getActiveProvider(settings).embeddingsFingerprint(settings);
 	}
 
 	getProgress(): RagIndexProgress {
@@ -75,7 +73,6 @@ export class RagIndexer {
 		this.queuedPaths.clear();
 		this.prefetchedFiles.clear();
 		this.listeners.clear();
-		this.cachedEmbeddings = null;
 	}
 
 	async reconcile(): Promise<void> {
@@ -202,23 +199,17 @@ export class RagIndexer {
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
-		const hostOrModelChanged = this.watchedHost !== settings.ollamaHost ||
-			this.watchedEmbeddingModel !== settings.ollamaEmbeddingModel;
+		const fingerprintChanged = this.watchedFingerprint !== getActiveProvider(settings).embeddingsFingerprint(settings);
 		const ignoreChanged = this.ignoreSource !== settings.ragIgnoredPaths;
 		this.settings = settings;
-		this.watchedHost = settings.ollamaHost;
-		this.watchedEmbeddingModel = settings.ollamaEmbeddingModel;
+		this.watchedFingerprint = getActiveProvider(settings).embeddingsFingerprint(settings);
 
 		if (ignoreChanged) {
 			this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
 			this.ignoreSource = settings.ragIgnoredPaths;
 		}
 
-		if (hostOrModelChanged) {
-			this.cachedEmbeddings = null;
-		}
-
-		if (hostOrModelChanged || ignoreChanged) {
+		if (fingerprintChanged || ignoreChanged) {
 			this.scheduleReconcile();
 		}
 	}
@@ -361,20 +352,11 @@ export class RagIndexer {
 	}
 
 	private isEmbeddingConfigured(): boolean {
-		return Boolean(this.settings.ollamaHost && this.settings.ollamaEmbeddingModel);
+		return getActiveProvider(this.settings).isConfigured(this.settings);
 	}
 
-	private getEmbeddingsClient(): OllamaEmbeddings {
-		const host = this.settings.ollamaHost;
-		const model = this.settings.ollamaEmbeddingModel;
-		if (!this.cachedEmbeddings || this.cachedEmbeddings.host !== host || this.cachedEmbeddings.model !== model) {
-			this.cachedEmbeddings = {
-				host,
-				model,
-				client: new OllamaEmbeddings({ baseUrl: host, model }),
-			};
-		}
-		return this.cachedEmbeddings.client;
+	private getEmbeddingsClient(): Embeddings {
+		return getEmbeddings(this.settings);
 	}
 
 	private isIgnored(path: string): boolean {
@@ -382,7 +364,7 @@ export class RagIndexer {
 	}
 
 	private getEmbeddingConfig(): string {
-		return `${this.settings.ollamaHost}|${this.settings.ollamaEmbeddingModel}`;
+		return getActiveProvider(this.settings).embeddingsFingerprint(this.settings);
 	}
 
 	private setProgress(progress: Partial<RagIndexProgress>): void {

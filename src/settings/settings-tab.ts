@@ -1,6 +1,6 @@
 import { debounce, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "../main";
-import { OllamaHttpClient } from "../agent/ollama-client";
+import { getActiveProvider } from "../providers";
 import { RagIndexProgress } from "../rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
 
@@ -45,7 +45,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	private renderSections(): void {
 		const { containerEl } = this;
 
-		this.renderSectionHeading(containerEl, "Ollama", "Configure the local model provider used by chat and embeddings.");
+		this.renderSectionHeading(containerEl, "Model Provider", "Configure the model provider used by chat and embeddings.");
 
 		new Setting(containerEl)
 			.setName("Ollama host")
@@ -108,7 +108,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Model thinking")
-			.setDesc("Reasoning stream for supported ollama models.")
+			.setDesc("Reasoning stream for supported models.")
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.ollamaThinking)
 				.onChange(async (value) => {
@@ -187,10 +187,12 @@ export class PorygonSettingTab extends PluginSettingTab {
 		let models: string[] = [];
 		let ok = false;
 		try {
-			const client = new OllamaHttpClient(host);
-			await client.version();
-			models = (await client.list()).models.map((m) => m.name);
-			ok = true;
+			const settings = { ...this.plugin.settings, ollamaHost: host };
+			const provider = getActiveProvider(settings);
+			if (await provider.checkHealth(settings)) {
+				models = (await provider.listModels(settings)) ?? [];
+				ok = true;
+			}
 		} catch {
 			ok = false;
 		}

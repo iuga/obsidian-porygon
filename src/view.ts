@@ -1,10 +1,10 @@
 import { getFrontMatterInfo, ItemView, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
-import { OllamaHttpClient, OllamaModel } from "./agent/ollama-client";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
+import { getActiveProvider } from "./providers";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 
@@ -105,12 +105,16 @@ const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
 	"Ready when your next idea is",
 	"What can I help untangle?",
 	"Start anywhere, we’ll shape it together",
+	"Where does today's thinking begin?",
+	"Drop a rough idea, we'll sharpen it",
+	"What's been sitting in the back of your mind?",
+	"What are you curious about right now?",
 ];
 
 export class PorygonView extends ItemView {
 	private plugin: PorygonPlugin;
 	private screen: OnboardingScreen = "welcome";
-	private models: OllamaModel[] = [];
+	private models: string[] = [];
 	private messages: ChatMessage[] = [];
 	private chatHistoryEl: HTMLElement | null = null;
 	private composerEl: HTMLElement | null = null;
@@ -481,7 +485,7 @@ export class PorygonView extends ItemView {
 		this.renderStepHint(editor, settingKey);
 		const defaultValue = settingKey === "ollamaChatModel" ? ONBOARDING_DEFAULTS.ollamaChatModel : ONBOARDING_DEFAULTS.ollamaEmbeddingModel;
 		const select = editor.createEl("select");
-		const modelNames = this.models.map((model) => model.name);
+		const modelNames = this.models;
 		const selectedValue = this.getPreferredModelValue(settingKey, defaultValue, modelNames);
 
 		if (modelNames.length === 0) {
@@ -622,11 +626,11 @@ export class PorygonView extends ItemView {
 	}
 
 	private async fetchModels(): Promise<void> {
-		const ollama = this.createOllamaClient();
-
-		await ollama.version();
-		const response = await ollama.list();
-		this.models = response.models;
+		const provider = getActiveProvider(this.plugin.settings);
+		if (!(await provider.checkHealth(this.plugin.settings))) {
+			throw new Error(`${provider.displayName} unreachable`);
+		}
+		this.models = (await provider.listModels(this.plugin.settings)) ?? [];
 	}
 
 	private async loadModelsForModelStep(): Promise<void> {
@@ -639,10 +643,6 @@ export class PorygonView extends ItemView {
 		} catch {
 			this.models = [];
 		}
-	}
-
-	private createOllamaClient(): OllamaHttpClient {
-		return new OllamaHttpClient(this.getOllamaBaseUrl());
 	}
 
 	private getOllamaBaseUrl(): string {
@@ -1674,13 +1674,10 @@ export class PorygonView extends ItemView {
 			};
 			await streamLocalAgent({
 				app: this.plugin.app,
+				settings: this.plugin.settings,
 				semanticSearch: this.plugin.ragSemanticSearch,
 				getIndexProgress: () => this.plugin.ragIndexer.getProgress(),
 				getYolo: () => this.plugin.settings.yolo,
-				ollamaHost: this.getOllamaBaseUrl(),
-				ollamaChatModel: this.plugin.settings.ollamaChatModel,
-				ollamaThinking: this.plugin.settings.ollamaThinking,
-				personalPrompt: this.plugin.settings.personalPrompt.trim(),
 				messages: agentMessages,
 				skills: this.plugin.skills,
 				sessionId: this.currentSessionId,
@@ -1914,8 +1911,7 @@ export class PorygonView extends ItemView {
 
 		try {
 			return this.sanitizeGeneratedSessionTitle(await generateSessionTitle({
-				ollamaHost: this.getOllamaBaseUrl(),
-				ollamaChatModel: this.plugin.settings.ollamaChatModel,
+				settings: this.plugin.settings,
 				userMessages,
 			})) || this.getFallbackSessionTitle(messages);
 		} catch (error) {
@@ -2133,8 +2129,7 @@ export class PorygonView extends ItemView {
 
 	private async updateHealthStatus(): Promise<boolean> {
 		try {
-			await this.createOllamaClient().version();
-			this.isHealthy = true;
+			this.isHealthy = await getActiveProvider(this.plugin.settings).checkHealth(this.plugin.settings);
 		} catch {
 			this.isHealthy = false;
 		}
