@@ -4,7 +4,7 @@ import PorygonPlugin from "./main";
 import { OllamaHttpClient, OllamaModel } from "./agent/ollama-client";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
-import { ChatMessage, ChatRole, MentionedFile, MentionedItem, MentionType } from "./chat/types";
+import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 

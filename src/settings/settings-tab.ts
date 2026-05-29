@@ -23,6 +23,10 @@ export class PorygonSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
+		this.refresh();
+	}
+
+	private refresh(): void {
 		this.containerEl.empty();
 		this.renderSections();
 		const host = this.getHost();
@@ -58,7 +62,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 				.setTooltip("Reload model list")
 				.onClick(() => {
 					this.modelsHost = null;
-					this.display();
+					this.refresh();
 				}));
 
 		this.renderModelDropdown("ollamaChatModel", "Ollama chat model", "Model used for chat responses.");
@@ -196,7 +200,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 		this.models = models;
 		this.modelsStatus = ok ? "ok" : "error";
-		this.display();
+		this.refresh();
 	}
 
 	private getHost(): string {
