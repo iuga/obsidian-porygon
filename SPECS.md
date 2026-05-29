@@ -13,6 +13,8 @@ The LangChain agent must be built once for the plugin lifetime (with per-turn sy
 
 When the thinking block was taller than the viewport, collapsing it on first answer delta shrank the message and left the streaming answer above the viewport. Re-pin the user message to the top so the answer fills the freed space below.
 
+Pinned `uuid` to `^11.1.1` via npm `overrides` to remediate GHSA-w5hq-g745-h8pq (silent out-of-bounds writes in `v3`/`v5`/`v6`), since `@langchain/langgraph`, `langgraph-checkpoint`, and `langgraph-sdk` still pull vulnerable `uuid` versions transitively and no patched upstream release is available yet.
+
 ## 0.7.1: Onboarding hints, Experience step, and RAG/memory fixes
 
 Each onboarding step now shows a muted inline hint under the question (default URL for the host step, `ollama run` commands for the chat and embedding steps), and going back to a completed step re-shows its question instead of the saved value so the guidance stays visible. A new fourth step, **Experience**, exposes a single dropdown that derives `ollamaThinking`, `showToolUsage`, and `yolo` from a preset — Minimal, Balanced, Verbose (default), or YOLO — persisted in a new `experience` setting, and the default embedding model is now `qwen3-embedding`. Two bugs are also fixed: `RagIndexer` and `RagSemanticSearchService` compared settings against the same live reference and never detected post-onboarding changes, so the index never ran (they now snapshot the watched fields and short-circuit when no embedding model is set); and `save_memory` rejected `id: null` because its schema only allowed `string | undefined`, which now accepts `null` and treats it as "append a new memory."
