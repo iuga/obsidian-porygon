@@ -1656,7 +1656,14 @@ export class PorygonView extends ItemView {
 					porygonMessage.areToolsCollapsed = true;
 					changed = true;
 				}
-				if (changed) this.chatList?.notifyChanged(porygonMessage);
+				if (changed) {
+					this.chatList?.notifyChanged(porygonMessage);
+					// Collapsing thinking can shrink the message by hundreds
+					// of px, pushing the freshly-streaming answer above the
+					// viewport. Re-pin the user message to the top so the
+					// answer fills the now-empty space below it.
+					requestAnimationFrame(() => this.chatList?.pinMessageToTop(userMessage));
+				}
 			};
 			const clearPendingAnswerPlaceholder = () => {
 				if (!hasStartedStreamingContent && hasPlaceholderContent) {
