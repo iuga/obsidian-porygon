@@ -500,23 +500,22 @@
 	padding: var(--size-4-2) 0;
 }
 
-.porygon-mention-filter.porygon-mention-filter,
-.porygon-slash-filter.porygon-slash-filter,
-.porygon-session-filter.porygon-session-filter {
+.porygon-mention-filter,
+.porygon-slash-filter,
+.porygon-session-filter {
 	width: 100%;
 	flex: 0 0 auto;
-	border: 1px solid var(--background-modifier-border);
+	border: 0;
 	box-shadow: none;
 	background: transparent;
 }
 
-.porygon-mention-filter.porygon-mention-filter:hover,
-.porygon-mention-filter.porygon-mention-filter:focus,
-.porygon-slash-filter.porygon-slash-filter:hover,
-.porygon-slash-filter.porygon-slash-filter:focus,
-.porygon-session-filter.porygon-session-filter:hover,
-.porygon-session-filter.porygon-session-filter:focus {
-	border: 1px solid var(--interactive-accent);
+.porygon-mention-filter:hover,
+.porygon-mention-filter:focus,
+.porygon-slash-filter:hover,
+.porygon-slash-filter:focus,
+.porygon-session-filter:hover,
+.porygon-session-filter:focus {
 	box-shadow: none;
 	background: transparent;
 }
