@@ -123,6 +123,7 @@ export class PorygonView extends ItemView {
 	private mentionTagsEl: HTMLElement | null = null;
 	private mentionPopoverEl: HTMLElement | null = null;
 	private mentionKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+	private mentionPointerDownHandler: ((event: PointerEvent) => void) | null = null;
 	private mentionResults: MentionSearchResult[] = [];
 	private selectedMentionResultIndex = 0;
 	private selectedMentions: MentionedItem[] = [];
@@ -808,9 +809,24 @@ export class PorygonView extends ItemView {
 			renderNotes();
 		});
 		this.mentionKeydownHandler = (event: KeyboardEvent) => this.handleMentionPopoverKeydown(event, notesEl, filterInput.value);
+		this.mentionPointerDownHandler = (event: PointerEvent) => this.handleMentionPointerDown(event);
 		window.addEventListener("keydown", this.mentionKeydownHandler, true);
+		window.addEventListener("pointerdown", this.mentionPointerDownHandler, true);
 		renderNotes();
 		filterInput.focus();
+	}
+
+	private handleMentionPointerDown(event: PointerEvent): void {
+		if (!this.mentionPopoverEl) {
+			return;
+		}
+
+		const target = event.target;
+		if (target instanceof Node && this.mentionPopoverEl.contains(target)) {
+			return;
+		}
+
+		this.closeMentionPopover();
 	}
 
 	private handleMentionPopoverKeydown(event: KeyboardEvent, notesEl: HTMLElement, query: string): void {
@@ -1021,6 +1037,11 @@ export class PorygonView extends ItemView {
 		if (this.mentionKeydownHandler) {
 			window.removeEventListener("keydown", this.mentionKeydownHandler, true);
 			this.mentionKeydownHandler = null;
+		}
+
+		if (this.mentionPointerDownHandler) {
+			window.removeEventListener("pointerdown", this.mentionPointerDownHandler, true);
+			this.mentionPointerDownHandler = null;
 		}
 
 		this.mentionPopoverEl?.remove();
