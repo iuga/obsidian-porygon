@@ -115,6 +115,7 @@ export class PorygonView extends ItemView {
 	private plugin: PorygonPlugin;
 	private screen: OnboardingScreen = "welcome";
 	private models: string[] = [];
+	private modelCapabilities: Record<string, string[]> = {};
 	private messages: ChatMessage[] = [];
 	private chatHistoryEl: HTMLElement | null = null;
 	private composerEl: HTMLElement | null = null;
@@ -274,6 +275,7 @@ export class PorygonView extends ItemView {
 			this.chatList = new ChatList(this.chatHistoryEl, {
 				app: this.plugin.app,
 				component: this,
+				showThinking: () => this.plugin.settings.showThinking,
 				showToolUsage: () => this.plugin.settings.showToolUsage,
 			});
 		}
@@ -485,8 +487,9 @@ export class PorygonView extends ItemView {
 		const editor = containerEl.createDiv({ cls: "porygon-step-editor" });
 		this.renderStepHint(editor, settingKey);
 		const defaultValue = settingKey === "ollamaChatModel" ? ONBOARDING_DEFAULTS.ollamaChatModel : ONBOARDING_DEFAULTS.ollamaEmbeddingModel;
+		const capability = settingKey === "ollamaChatModel" ? "completion" : "embedding";
 		const select = editor.createEl("select");
-		const modelNames = this.models;
+		const modelNames = this.models.filter((model) => this.modelCapabilities[model]?.includes(capability));
 		const selectedValue = this.getPreferredModelValue(settingKey, defaultValue, modelNames);
 
 		if (modelNames.length === 0) {
@@ -498,6 +501,20 @@ export class PorygonView extends ItemView {
 				option.selected = modelName === selectedValue;
 			});
 		}
+
+		const tagsEl = settingKey === "ollamaChatModel" ? editor.createDiv({ cls: "porygon-onboarding-capability-tags" }) : null;
+		const renderTags = () => {
+			if (!tagsEl) {
+				return;
+			}
+			tagsEl.empty();
+			const capabilities = select.value ? this.modelCapabilities[select.value] ?? [] : [];
+			capabilities.forEach((cap) => {
+				tagsEl.createSpan({ cls: "porygon-onboarding-capability-tag", text: cap });
+			});
+		};
+		renderTags();
+		select.addEventListener("change", renderTags);
 
 		const errorEl = editor.createDiv({ cls: "porygon-onboarding-error" });
 		if (modelNames.length === 0) {
@@ -616,7 +633,10 @@ export class PorygonView extends ItemView {
 
 		try {
 			this.plugin.settings.experience = preset.value;
-			this.plugin.settings.ollamaThinking = preset.ollamaThinking;
+			const chatModel = this.plugin.settings.ollamaChatModel;
+			const canThink = chatModel ? (this.modelCapabilities[chatModel]?.includes("thinking") ?? false) : false;
+			this.plugin.settings.thinkingEffort = canThink ? "medium" : "off";
+			this.plugin.settings.showThinking = preset.showThinking;
 			this.plugin.settings.showToolUsage = preset.showToolUsage;
 			this.plugin.settings.yolo = preset.yolo;
 			await this.plugin.saveSettings();
@@ -632,6 +652,10 @@ export class PorygonView extends ItemView {
 			throw new Error(`${provider.displayName} unreachable`);
 		}
 		this.models = (await provider.listModels(this.plugin.settings)) ?? [];
+		const infos = await Promise.all(this.models.map((model) => provider.showModel(this.plugin.settings, model)));
+		this.modelCapabilities = Object.fromEntries(
+			infos.flatMap((info) => (info ? [[info.model, info.capabilities]] : [])),
+		);
 	}
 
 	private async loadModelsForModelStep(): Promise<void> {
@@ -643,6 +667,7 @@ export class PorygonView extends ItemView {
 			await this.fetchModels();
 		} catch {
 			this.models = [];
+			this.modelCapabilities = {};
 		}
 	}
 

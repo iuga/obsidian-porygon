@@ -75,8 +75,12 @@ export default class PorygonPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const savedSettings = await this.loadData() as Partial<PorygonPluginSettings> | null;
+		const savedSettings = await this.loadData() as Partial<PorygonPluginSettings> & { ollamaThinking?: boolean } | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings);
+		if (savedSettings && savedSettings.thinkingEffort === undefined && typeof savedSettings.ollamaThinking === "boolean") {
+			this.settings.thinkingEffort = savedSettings.ollamaThinking ? "medium" : "off";
+			this.settings.showThinking = savedSettings.ollamaThinking;
+		}
 		this.settings.memories = sanitizeMemories(this.settings.memories);
 	}
 
@@ -85,7 +89,7 @@ export default class PorygonPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.ragIndexer.updateSettings(this.settings);
 		this.ragSemanticSearch.updateSettings(this.settings);
-		// Settings may have changed host/model/thinking; drop the cached agent
+		// Settings may have changed host/model/thinking effort; drop the cached agent
 		// so the next send rebuilds it with the new config.
 		resetAgent();
 	}

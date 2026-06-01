@@ -88,7 +88,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	if (!agent) {
 		const provider = getActiveProvider(options.settings);
 		agent = createAgent({
-			model: provider.createChatModel(options.settings, { thinking: options.settings.ollamaThinking }),
+			model: provider.createChatModel(options.settings, { thinkingEffort: options.settings.thinkingEffort }),
 			tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
 			middleware: [
 				dynamicSystemPromptMiddleware(() => new SystemMessage(currentSystemPrompt.value)),

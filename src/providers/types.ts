@@ -1,11 +1,25 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { Embeddings } from "@langchain/core/embeddings";
-import type { PorygonPluginSettings } from "../settings/settings";
+import type { PorygonPluginSettings, ThinkingEffort } from "../settings/settings";
 
 export type ProviderId = "ollama";
 
 export interface ChatModelConfig {
-	thinking: boolean;
+	thinkingEffort: ThinkingEffort;
+}
+
+export interface ModelDetails {
+	// Model architecture/family, e.g. "gemma3", "llama". Null when unknown.
+	family: string | null;
+}
+
+export interface ModelInfo {
+	// The model name this info was resolved for.
+	model: string;
+	// Capability flags as reported by the provider, e.g. "completion", "vision".
+	capabilities: string[];
+	// Normalized subset of provider model details.
+	details: ModelDetails;
 }
 
 export interface ProviderDefinition {
@@ -22,4 +36,7 @@ export interface ProviderDefinition {
 	// Available model names, or `null` when the provider can't enumerate them
 	// (e.g. a future cloud provider with a fixed catalog handled in the UI).
 	listModels(settings: PorygonPluginSettings): Promise<string[] | null>;
+	// Model details and capabilities, or `null` when the model is unknown /
+	// the provider can't describe it. Never throws for "not found".
+	showModel(settings: PorygonPluginSettings, model: string): Promise<ModelInfo | null>;
 }

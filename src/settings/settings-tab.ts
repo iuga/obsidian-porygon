@@ -3,6 +3,7 @@ import PorygonPlugin from "../main";
 import { getActiveProvider } from "../providers";
 import { RagIndexProgress } from "../rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
+import type { ThinkingEffort } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
 
@@ -11,6 +12,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	private statusSetting: Setting | null = null;
 	private unsubscribeProgress: (() => void) | null = null;
 	private models: string[] = [];
+	private modelCapabilities: Record<string, string[]> = {};
 	private modelsHost: string | null = null;
 	private modelsStatus: "loading" | "ok" | "error" = "loading";
 	private readonly persist = debounce(() => {
@@ -47,7 +49,10 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 		this.renderSectionHeading(containerEl, "Model Provider", "Configure the model provider used by chat and embeddings.");
 
-		new Setting(containerEl)
+		const providerGroup = containerEl.createDiv({ cls: "setting-group" });
+		const providerItems = providerGroup.createDiv({ cls: "setting-items" });
+
+		new Setting(providerItems)
 			.setName("Ollama host")
 			.setDesc(this.getHostStatusDesc())
 			.addText((text) => text
@@ -65,12 +70,51 @@ export class PorygonSettingTab extends PluginSettingTab {
 					this.refresh();
 				}));
 
-		this.renderModelDropdown("ollamaChatModel", "Ollama chat model", "Model used for chat responses.");
-		this.renderModelDropdown("ollamaEmbeddingModel", "Ollama embeddings model", "Model used for semantic search.");
+		this.renderModelDropdown(providerItems, "ollamaChatModel", "Chat model", "Model used for chat responses.", "completion");
+		this.renderThinkingEffort(providerItems);
+		this.renderModelDropdown(providerItems, "ollamaEmbeddingModel", "Embeddings model", "Model used for semantic search.", "embedding");
+
+		this.renderSectionHeading(containerEl, "Chat Experience", "Control chat behavior and how agent activity appears.");
+
+		const chatGroup = containerEl.createDiv({ cls: "setting-group" });
+		const chatItems = chatGroup.createDiv({ cls: "setting-items" });
+
+		new Setting(chatItems)
+			.setName("Show thinking")
+			.setDesc("Display the reasoning stream in chat. Thinking effort still applies when hidden.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.showThinking)
+				.onChange(async (value) => {
+					this.plugin.settings.showThinking = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(chatItems)
+			.setName("Tool usage reporting")
+			.setDesc("Show tool calls and their intent in chat history.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.showToolUsage)
+				.onChange(async (value) => {
+					this.plugin.settings.showToolUsage = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(chatItems)
+			.setName("Yolo mode")
+			.setDesc("Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.yolo)
+				.onChange(async (value) => {
+					this.plugin.settings.yolo = value;
+					await this.plugin.saveSettings();
+				}));
 
 		this.renderSectionHeading(containerEl, "Personalization", "Customize the instructions sent before each chat.");
 
-		const personalPromptSetting = new Setting(containerEl)
+		const personalizationGroup = containerEl.createDiv({ cls: "setting-group" });
+		const personalizationItems = personalizationGroup.createDiv({ cls: "setting-items" });
+
+		const personalPromptSetting = new Setting(personalizationItems)
 			.setName("Personal prompt")
 			.setDesc("Tone and response preferences sent before each chat.")
 			.addTextArea((textArea) => {
@@ -85,7 +129,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 			});
 		personalPromptSetting.settingEl.addClass("porygon-settings-prompt-setting");
 
-		const memoriesSetting = new Setting(containerEl)
+		const memoriesSetting = new Setting(personalizationItems)
 			.setName("Memories")
 			.setDesc("Long-term memories the assistant has saved about you. Sorted by importance and recency. Edit or remove lines to curate what the assistant remembers; lines that don't match the format are discarded on save.")
 			.addTextArea((textArea) => {
@@ -104,43 +148,15 @@ export class PorygonSettingTab extends PluginSettingTab {
 			});
 		memoriesSetting.settingEl.addClass("porygon-settings-prompt-setting");
 
-		this.renderSectionHeading(containerEl, "Chat", "Control chat behavior and how agent activity appears.");
-
-		new Setting(containerEl)
-			.setName("Model thinking")
-			.setDesc("Reasoning stream for supported models.")
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.ollamaThinking)
-				.onChange(async (value) => {
-					this.plugin.settings.ollamaThinking = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName("Tool usage reporting")
-			.setDesc("Show tool calls and their intent in chat history.")
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.showToolUsage)
-				.onChange(async (value) => {
-					this.plugin.settings.showToolUsage = value;
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName("Yolo mode")
-			.setDesc("Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.")
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.yolo)
-				.onChange(async (value) => {
-					this.plugin.settings.yolo = value;
-					await this.plugin.saveSettings();
-				}));
-
 		this.renderSectionHeading(containerEl, "Semantic search", "Configure local semantic indexing.");
-		this.statusSetting = new Setting(containerEl).setName("Index status");
+
+		const semanticGroup = containerEl.createDiv({ cls: "setting-group" });
+		const semanticItems = semanticGroup.createDiv({ cls: "setting-items" });
+
+		this.statusSetting = new Setting(semanticItems).setName("Index status");
 		this.subscribeToIndexProgress();
 
-		const ignoredPathsSetting = new Setting(containerEl)
+		const ignoredPathsSetting = new Setting(semanticItems)
 			.setName("Ignored semantic index paths")
 			.setDesc("Vault-relative files or folders to exclude from the semantic index. Use one path or glob-like pattern per line.")
 			.addTextArea((textArea) => {
@@ -157,12 +173,13 @@ export class PorygonSettingTab extends PluginSettingTab {
 		ignoredPathsSetting.settingEl.addClass("porygon-settings-textarea-setting");
 	}
 
-	private renderModelDropdown(key: ModelSettingKey, name: string, desc: string): void {
+	private renderModelDropdown(containerEl: HTMLElement, key: ModelSettingKey, name: string, desc: string, capability: string): void {
 		const current = this.plugin.settings[key];
-		const installed = current ? this.models.includes(current) : false;
-		const hasAny = this.models.length > 0 || !!current;
+		const available = this.models.filter((m) => this.modelCapabilities[m]?.includes(capability));
+		const installed = current ? available.includes(current) : false;
+		const hasAny = available.length > 0 || !!current;
 
-		const setting = new Setting(this.containerEl).setName(name).setDesc(desc);
+		const setting = new Setting(containerEl).setName(name).setDesc(desc);
 		setting.addDropdown((dd) => {
 			if (!hasAny) {
 				dd.addOption("", "No models available");
@@ -172,12 +189,69 @@ export class PorygonSettingTab extends PluginSettingTab {
 			if (current && !installed) {
 				dd.addOption(current, `${current} (not installed)`);
 			}
-			this.models.forEach((m) => { dd.addOption(m, m); });
-			dd.setValue(current || this.pickDefault(key));
+			available.forEach((m) => { dd.addOption(m, m); });
+			dd.setValue(current || this.pickDefault(key, available));
 			dd.onChange((value) => {
 				this.plugin.settings[key] = value;
 				this.persist();
+				if (key === "ollamaChatModel") {
+					this.refresh();
+				}
 			});
+		});
+
+		if (key === "ollamaChatModel") {
+			this.renderCapabilityTags(setting, current);
+		}
+	}
+
+	private renderThinkingEffort(containerEl: HTMLElement): void {
+		const model = this.plugin.settings.ollamaChatModel;
+		const canThink = model ? (this.modelCapabilities[model]?.includes("thinking") ?? false) : false;
+
+		// Capabilities load asynchronously. While they're unknown, leave the
+		// stored effort untouched and skip the control so we never clobber the
+		// user's choice based on a transient empty capability map.
+		if (this.modelsStatus !== "ok") {
+			return;
+		}
+
+		// A non-thinking model can't reason; pin the effort off so the chat
+		// call never forwards a graded value the model would ignore.
+		if (!canThink) {
+			if (this.plugin.settings.thinkingEffort !== "off") {
+				this.plugin.settings.thinkingEffort = "off";
+				this.persist();
+			}
+			return;
+		}
+
+		const effort = new Setting(containerEl)
+			.setName("Thinking effort")
+			.setDesc("How much the model reasons before answering.")
+			.addDropdown((dd) => {
+				dd.addOption("off", "Off");
+				dd.addOption("low", "Low");
+				dd.addOption("medium", "Medium");
+				dd.addOption("high", "High");
+				dd.setValue(this.plugin.settings.thinkingEffort);
+				dd.onChange((value) => {
+					this.plugin.settings.thinkingEffort = value as ThinkingEffort;
+					this.persist();
+				});
+			});
+		effort.setClass("porygon-settings-child");
+	}
+
+	private renderCapabilityTags(setting: Setting, model: string): void {
+		const capabilities = model ? this.modelCapabilities[model] ?? [] : [];
+		if (capabilities.length === 0) {
+			return;
+		}
+
+		const tagsEl = setting.descEl.createDiv({ cls: "porygon-settings-capability-tags" });
+		capabilities.forEach((capability) => {
+			tagsEl.createSpan({ cls: "porygon-settings-capability-tag", text: capability });
 		});
 	}
 
@@ -185,12 +259,17 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.modelsHost = host;
 		this.modelsStatus = "loading";
 		let models: string[] = [];
+		let capabilities: Record<string, string[]> = {};
 		let ok = false;
 		try {
 			const settings = { ...this.plugin.settings, ollamaHost: host };
 			const provider = getActiveProvider(settings);
 			if (await provider.checkHealth(settings)) {
 				models = (await provider.listModels(settings)) ?? [];
+				const infos = await Promise.all(models.map((model) => provider.showModel(settings, model)));
+				capabilities = Object.fromEntries(
+					infos.flatMap((info) => (info ? [[info.model, info.capabilities]] : [])),
+				);
 				ok = true;
 			}
 		} catch {
@@ -201,6 +280,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 			return;
 		}
 		this.models = models;
+		this.modelCapabilities = capabilities;
 		this.modelsStatus = ok ? "ok" : "error";
 		this.refresh();
 	}
@@ -220,12 +300,12 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 	}
 
-	private pickDefault(key: ModelSettingKey): string {
+	private pickDefault(key: ModelSettingKey, available: string[]): string {
 		const fallback = key === "ollamaChatModel" ? ONBOARDING_DEFAULTS.ollamaChatModel : ONBOARDING_DEFAULTS.ollamaEmbeddingModel;
 		const latest = `${fallback}:latest`;
-		if (this.models.includes(latest)) return latest;
-		if (this.models.includes(fallback)) return fallback;
-		return this.models[0] ?? "";
+		if (available.includes(latest)) return latest;
+		if (available.includes(fallback)) return fallback;
+		return available[0] ?? "";
 	}
 
 	private subscribeToIndexProgress(): void {

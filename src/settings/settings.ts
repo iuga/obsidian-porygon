@@ -3,11 +3,14 @@ import { DEFAULT_MEMORIES } from "../agent/memories";
 
 export type ExperiencePreset = "" | "minimal" | "balanced" | "verbose" | "yolo";
 
+export type ThinkingEffort = "off" | "low" | "medium" | "high";
+
 export interface PorygonPluginSettings {
 	ollamaHost: string;
 	ollamaChatModel: string;
 	ollamaEmbeddingModel: string;
-	ollamaThinking: boolean;
+	thinkingEffort: ThinkingEffort;
+	showThinking: boolean;
 	showToolUsage: boolean;
 	yolo: boolean;
 	experience: ExperiencePreset;
@@ -22,7 +25,8 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	ollamaHost: "",
 	ollamaChatModel: "",
 	ollamaEmbeddingModel: "",
-	ollamaThinking: false,
+	thinkingEffort: "medium",
+	showThinking: false,
 	showToolUsage: false,
 	yolo: false,
 	experience: "",
@@ -35,7 +39,8 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	ollamaHost: "http://localhost:11434",
 	ollamaChatModel: "gemma4",
 	ollamaEmbeddingModel: "qwen3-embedding",
-	ollamaThinking: false,
+	thinkingEffort: "medium",
+	showThinking: true,
 	showToolUsage: false,
 	yolo: false,
 	experience: "verbose",
@@ -48,7 +53,7 @@ export interface ExperiencePresetConfig {
 	value: Exclude<ExperiencePreset, "">;
 	label: string;
 	description: string;
-	ollamaThinking: boolean;
+	showThinking: boolean;
 	showToolUsage: boolean;
 	yolo: boolean;
 }
@@ -58,7 +63,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 		value: "minimal",
 		label: "Minimal — just the answer",
 		description: "Clean replies only. No reasoning, no tool activity.",
-		ollamaThinking: false,
+		showThinking: false,
 		showToolUsage: false,
 		yolo: false,
 	},
@@ -66,7 +71,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 		value: "balanced",
 		label: "Balanced — show tool activity",
 		description: "See what Porygon does in your vault, without the inner monologue.",
-		ollamaThinking: false,
+		showThinking: false,
 		showToolUsage: true,
 		yolo: false,
 	},
@@ -74,7 +79,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 		value: "verbose",
 		label: "Verbose — show thinking and tools (recommended)",
 		description: "Full transparency: reasoning stream and every tool call.",
-		ollamaThinking: true,
+		showThinking: true,
 		showToolUsage: true,
 		yolo: false,
 	},
@@ -82,7 +87,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 		value: "yolo",
 		label: "YOLO — auto-approve everything",
 		description: "Skip approvals for vault changes. No reasoning, no tool reporting.",
-		ollamaThinking: false,
+		showThinking: false,
 		showToolUsage: false,
 		yolo: true,
 	},

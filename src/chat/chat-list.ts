@@ -5,6 +5,7 @@ import { ChatMessage, StreamingDeltaKind } from "./types";
 interface ChatListDeps {
 	app: App;
 	component: Component;
+	showThinking: () => boolean;
 	showToolUsage: () => boolean;
 }
 
@@ -137,7 +138,8 @@ export class ChatList {
 				row = new MessageRow(message, {
 					app: this.deps.app,
 					component: this.deps.component,
-					showToolUsage: this.deps.showToolUsage,
+					showThinking: this.deps.showThinking,
+		showToolUsage: this.deps.showToolUsage,
 				});
 				this.rows.set(message, row);
 				this.resizeObserver?.observe(row.el);

@@ -11,7 +11,7 @@ export interface SessionTitleAgentOptions {
 
 export async function generateSessionTitle(options: SessionTitleAgentOptions): Promise<string> {
 	const provider = getActiveProvider(options.settings);
-	const model = provider.createChatModel(options.settings, { thinking: false });
+	const model = provider.createChatModel(options.settings, { thinkingEffort: "off" });
 	const response = await model.invoke([
 		toSystemMessage(SESSION_TITLE_SYSTEM_PROMPT),
 		{ role: "user", content: options.userMessages.join("\n\n") },

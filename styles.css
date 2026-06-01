@@ -361,6 +361,29 @@
 	padding-top: 0;
 }
 
+.porygon-settings-capability-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-2);
+	margin-top: var(--size-2-3);
+}
+
+.porygon-settings-child .setting-item-name {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.porygon-settings-capability-tag {
+	padding: var(--size-2-1) var(--size-2-3);
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
 .porygon-settings-prompt-setting,
 .porygon-settings-textarea-setting {
 	display: block;
@@ -868,6 +891,27 @@
 
 .porygon-onboarding-error:empty {
 	display: none;
+}
+
+.porygon-onboarding-capability-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-2);
+}
+
+.porygon-onboarding-capability-tags:empty {
+	display: none;
+}
+
+.porygon-onboarding-capability-tag {
+	padding: var(--size-2-1) var(--size-2-3);
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
 }
 
 .porygon-step-hint {

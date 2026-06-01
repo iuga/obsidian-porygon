@@ -4,6 +4,7 @@ import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./t
 interface MessageRowDeps {
 	app: App;
 	component: Component;
+	showThinking: () => boolean;
 	showToolUsage: () => boolean;
 	onMentionClickRemove?: (path: string) => void;
 }
@@ -95,7 +96,7 @@ export class MessageRow {
 			return;
 		}
 
-		const showThinking = message.role === "porygon" && !!message.thinking;
+		const showThinking = this.deps.showThinking() && message.role === "porygon" && !!message.thinking;
 		const showTools = this.deps.showToolUsage() && message.role === "porygon" && !!message.toolIntents && message.toolIntents.length > 0;
 		const showContent = !(message.role === "porygon" && !message.content);
 
