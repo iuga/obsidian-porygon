@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, ItemView, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
@@ -43,6 +43,21 @@ interface SlashCommand {
 	description: string;
 	icon: string;
 }
+
+type FeedbackType = "error" | "info" | "hint";
+
+interface FeedbackCallToAction {
+	label: string;
+	action: () => void;
+}
+
+const FEEDBACK_ICONS: Record<FeedbackType, string> = {
+	error: "bug",
+	info: "info",
+	hint: "badge-info",
+};
+
+const FEEDBACK_AUTO_DISMISS_MS = 5000;
 
 interface SessionSummary {
 	file: TFile;
@@ -142,6 +157,10 @@ export class PorygonView extends ItemView {
 	private askPopoverEl: HTMLElement | null = null;
 	private askKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 	private askResolve: ((reply: string) => void) | null = null;
+	private feedbackPopoverEl: HTMLElement | null = null;
+	private feedbackKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+	private feedbackPointerDownHandler: ((event: PointerEvent) => void) | null = null;
+	private feedbackDismissTimer: number | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
 	private isSessionMemoryPrimed = false;
@@ -183,6 +202,7 @@ export class PorygonView extends ItemView {
 
 	onClose(): Promise<void> {
 		this.closeAskUserPopover(true);
+		this.closeFeedbackPopover();
 		if (this.chatList) {
 			this.chatList.dispose();
 			this.chatList = null;
@@ -819,6 +839,7 @@ export class PorygonView extends ItemView {
 
 	private renderMentionPopover(composerEl: HTMLElement): void {
 		this.closeMentionPopover();
+		this.closeFeedbackPopover();
 		const popover = composerEl.createDiv({ cls: "porygon-mention-popover" });
 		this.mentionPopoverEl = popover;
 		const panel = popover.createDiv({ cls: "porygon-mention-panel" });
@@ -1077,6 +1098,7 @@ export class PorygonView extends ItemView {
 
 	private renderSlashCommandPopover(composerEl: HTMLElement): void {
 		this.closeSlashCommandPopover();
+		this.closeFeedbackPopover();
 		const popover = composerEl.createDiv({ cls: "porygon-slash-popover" });
 		this.slashCommandPopoverEl = popover;
 		const panel = popover.createDiv({ cls: "porygon-slash-panel" });
@@ -1247,6 +1269,7 @@ export class PorygonView extends ItemView {
 		this.closeSessionPopover();
 		this.closeMentionPopover();
 		this.closeSlashCommandPopover();
+		this.closeFeedbackPopover();
 		const popover = composerEl.createDiv({ cls: "porygon-session-popover" });
 		this.sessionPopoverEl = popover;
 		const panel = popover.createDiv({ cls: "porygon-session-panel" });
@@ -1459,6 +1482,7 @@ export class PorygonView extends ItemView {
 		this.closeMentionPopover();
 		this.closeSlashCommandPopover();
 		this.closeSessionPopover();
+		this.closeFeedbackPopover();
 
 		const popover = composerEl.createDiv({ cls: "porygon-ask-popover" });
 		this.askPopoverEl = popover;
@@ -1586,6 +1610,87 @@ export class PorygonView extends ItemView {
 			this.askResolve = null;
 			resolve("");
 		}
+	}
+
+	private showFeedback(type: FeedbackType, markdown: string, cta?: FeedbackCallToAction): void {
+		if (!this.composerEl) {
+			return;
+		}
+
+		this.closeFeedbackPopover();
+		this.closeMentionPopover();
+		this.closeSlashCommandPopover();
+		this.closeSessionPopover();
+
+		const popover = this.composerEl.createDiv({ cls: `porygon-feedback-popover is-${type}` });
+		this.feedbackPopoverEl = popover;
+		const panel = popover.createDiv({ cls: "porygon-feedback-panel" });
+
+		const iconEl = panel.createDiv({ cls: "porygon-feedback-icon" });
+		setIcon(iconEl, FEEDBACK_ICONS[type]);
+
+		const messageEl = panel.createDiv({ cls: "porygon-feedback-message" });
+		void MarkdownRenderer.render(this.plugin.app, markdown, messageEl, "/", this);
+
+		if (cta) {
+			const ctaButton = panel.createEl("button", {
+				cls: "porygon-feedback-cta",
+				text: cta.label,
+				attr: { type: "button", title: cta.label, "aria-label": cta.label },
+			});
+			ctaButton.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				cta.action();
+				this.closeFeedbackPopover();
+			});
+		}
+
+		this.feedbackKeydownHandler = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || !this.feedbackPopoverEl) {
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			this.closeFeedbackPopover();
+			this.composerInputEl?.focus();
+		};
+		this.feedbackPointerDownHandler = (event: PointerEvent) => {
+			if (!this.feedbackPopoverEl) {
+				return;
+			}
+			const target = event.target;
+			if (target instanceof Node && this.feedbackPopoverEl.contains(target)) {
+				return;
+			}
+			this.closeFeedbackPopover();
+		};
+		window.addEventListener("keydown", this.feedbackKeydownHandler, true);
+		window.addEventListener("pointerdown", this.feedbackPointerDownHandler, true);
+
+		if (type !== "error") {
+			this.feedbackDismissTimer = window.setTimeout(() => this.closeFeedbackPopover(), FEEDBACK_AUTO_DISMISS_MS);
+		}
+	}
+
+	private closeFeedbackPopover(): void {
+		if (this.feedbackDismissTimer !== null) {
+			window.clearTimeout(this.feedbackDismissTimer);
+			this.feedbackDismissTimer = null;
+		}
+
+		if (this.feedbackKeydownHandler) {
+			window.removeEventListener("keydown", this.feedbackKeydownHandler, true);
+			this.feedbackKeydownHandler = null;
+		}
+
+		if (this.feedbackPointerDownHandler) {
+			window.removeEventListener("pointerdown", this.feedbackPointerDownHandler, true);
+			this.feedbackPointerDownHandler = null;
+		}
+
+		this.feedbackPopoverEl?.remove();
+		this.feedbackPopoverEl = null;
 	}
 
 	private getUnavailableMentionPaths(): Set<string> {
@@ -1885,31 +1990,50 @@ export class PorygonView extends ItemView {
 	private async saveSession(): Promise<void> {
 		const visibleMessages = this.messages.filter((message): message is ChatMessage & { role: "user" | "porygon" } => message.role === "user" || message.role === "porygon");
 		if (visibleMessages.length === 0) {
-			this.messages.push({ role: "warning", content: "No session to save." });
-			this.renderMessages();
+			this.showFeedback("hint", "No session to save yet \u2014 start a conversation first.");
 			return;
 		}
 
 		try {
 			const sessionId = this.currentSessionId ?? crypto.randomUUID();
-			const title = await this.getTitleForSave(visibleMessages);
+			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
 			this.currentSessionId = sessionId;
 			this.currentSessionTitle = title;
 			const filename = `${PORYGON_SESSIONS_FOLDER}/${sessionId}.md`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
 			await this.ensureFolderExists(PORYGON_SESSIONS_FOLDER);
-			const existingFile = this.plugin.app.vault.getAbstractFileByPath(filename);
-
-			if (existingFile instanceof TFile) {
-				await this.plugin.app.vault.modify(existingFile, content);
-			} else {
-				await this.plugin.app.vault.create(filename, content);
-			}
+			await this.writeSessionFile(filename, content);
+			this.showFeedback("info", `Saved session to \`${filename}\``, {
+				label: "Open",
+				action: () => void this.plugin.app.workspace.openLinkText(filename, "/", false),
+			});
 		} catch (error) {
-			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
-			this.renderMessages();
+			this.showFeedback("error", `Couldn't save the session: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+
+	private async writeSessionFile(filename: string, content: string): Promise<void> {
+		const existingFile = this.plugin.app.vault.getAbstractFileByPath(filename);
+		if (existingFile instanceof TFile) {
+			await this.plugin.app.vault.modify(existingFile, content);
+			return;
+		}
+
+		try {
+			await this.plugin.app.vault.create(filename, content);
+		} catch (error) {
+			// The metadata cache can lag behind disk, so a create can fail with
+			// "file already exists" even though getAbstractFileByPath returned null.
+			// Fall back to modifying the file that actually exists on disk.
+			const raced = this.plugin.app.vault.getAbstractFileByPath(filename);
+			if (raced instanceof TFile) {
+				await this.plugin.app.vault.modify(raced, content);
+				return;
+			}
+			throw error;
+		}
+	}
+
 
 	private formatSessionForSave(sessionId: string, title: string, messages: Array<ChatMessage & { role: "user" | "porygon" }>): string {
 		const frontmatterData: SessionMetadata = { id: sessionId, title };

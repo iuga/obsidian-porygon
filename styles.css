@@ -473,7 +473,8 @@
 .porygon-mention-popover,
 .porygon-slash-popover,
 .porygon-session-popover,
-.porygon-ask-popover {
+.porygon-ask-popover,
+.porygon-feedback-popover {
 	position: absolute;
 	left: 20px;
 	right: 20px;
@@ -487,6 +488,48 @@
 	border-radius: var(--radius-l) var(--radius-l) 0 0;
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 	background: var(--background-secondary-alt);
+}
+
+.porygon-feedback-popover.is-error {
+	box-shadow: 0 0 0 1px var(--color-red);
+}
+
+.porygon-feedback-panel {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	padding: var(--size-4-3) 0;
+}
+
+.porygon-feedback-icon {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.porygon-feedback-popover.is-error .porygon-feedback-icon {
+	color: var(--color-red);
+}
+
+.porygon-feedback-icon svg {
+	width: 18px;
+	height: 18px;
+}
+
+.porygon-feedback-message {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--font-ui-smaller);
+	word-break: break-word;
+}
+
+.porygon-feedback-message p {
+	margin: 0;
+}
+
+.porygon-feedback-cta {
+	flex: 0 0 auto;
 }
 
 .porygon-mention-panel,
