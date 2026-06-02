@@ -5,6 +5,7 @@ import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./set
 import { ChatList } from "./chat/chat-list";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 import { getActiveProvider } from "./providers";
+import { PopoverHost } from "./ui/popover";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 
@@ -45,6 +46,12 @@ interface SlashCommand {
 }
 
 type FeedbackType = "error" | "info" | "hint";
+
+const POPOVER_MENTION = "mention";
+const POPOVER_SLASH = "slash";
+const POPOVER_SESSION = "session";
+const POPOVER_ASK = "ask";
+const POPOVER_FEEDBACK = "feedback";
 
 interface FeedbackCallToAction {
 	label: string;
@@ -137,30 +144,16 @@ export class PorygonView extends ItemView {
 	private composerInputEl: HTMLTextAreaElement | null = null;
 	private sendButtonEl: HTMLButtonElement | null = null;
 	private mentionTagsEl: HTMLElement | null = null;
-	private mentionPopoverEl: HTMLElement | null = null;
-	private mentionKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
-	private mentionPointerDownHandler: ((event: PointerEvent) => void) | null = null;
+	private popoverHost = new PopoverHost();
 	private mentionResults: MentionSearchResult[] = [];
 	private selectedMentionResultIndex = 0;
 	private selectedMentions: MentionedItem[] = [];
-	private slashCommandPopoverEl: HTMLElement | null = null;
-	private slashCommandKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
-	private slashCommandPointerDownHandler: ((event: PointerEvent) => void) | null = null;
 	private filteredSlashCommands: SlashCommand[] = [];
 	private selectedSlashCommandIndex = 0;
-	private sessionPopoverEl: HTMLElement | null = null;
-	private sessionKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
-	private sessionPointerDownHandler: ((event: PointerEvent) => void) | null = null;
 	private sessionResults: SessionSummary[] = [];
 	private allSessionSummaries: SessionSummary[] = [];
 	private selectedSessionIndex = 0;
-	private askPopoverEl: HTMLElement | null = null;
-	private askKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
 	private askResolve: ((reply: string) => void) | null = null;
-	private feedbackPopoverEl: HTMLElement | null = null;
-	private feedbackKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
-	private feedbackPointerDownHandler: ((event: PointerEvent) => void) | null = null;
-	private feedbackDismissTimer: number | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
 	private isSessionMemoryPrimed = false;
@@ -201,8 +194,7 @@ export class PorygonView extends ItemView {
 	}
 
 	onClose(): Promise<void> {
-		this.closeAskUserPopover(true);
-		this.closeFeedbackPopover();
+		this.popoverHost.closeCurrent();
 		if (this.chatList) {
 			this.chatList.dispose();
 			this.chatList = null;
@@ -346,26 +338,18 @@ export class PorygonView extends ItemView {
 
 		this.composerInputEl.addEventListener("input", () => this.handleComposerInput());
 		this.composerInputEl.addEventListener("keydown", (event) => {
-			if (event.key === "Escape" && this.mentionPopoverEl) {
+			if (event.key === "Escape" && this.popoverHost.isOpen()) {
 				event.preventDefault();
-				this.closeMentionPopover();
+				this.popoverHost.closeCurrent();
 				return;
 			}
 
-			if (event.key === "Escape" && this.slashCommandPopoverEl) {
-				event.preventDefault();
-				this.closeSlashCommandPopover();
-				return;
-			}
-
-			if (event.key === "@" && !this.mentionPopoverEl) {
-				this.closeSlashCommandPopover();
+			if (event.key === "@" && !this.popoverHost.isOpen(POPOVER_MENTION)) {
 				window.setTimeout(() => this.renderMentionPopover(composer), 0);
 				return;
 			}
 
-			if (event.key === "/" && !this.slashCommandPopoverEl) {
-				this.closeMentionPopover();
+			if (event.key === "/" && !this.popoverHost.isOpen(POPOVER_SLASH)) {
 				window.setTimeout(() => this.renderSlashCommandPopover(composer), 0);
 				return;
 			}
@@ -779,10 +763,7 @@ export class PorygonView extends ItemView {
 		this.messages = [];
 		this.selectedMentions = [];
 		this.renderMentionTags();
-		this.closeMentionPopover();
-		this.closeSlashCommandPopover();
-		this.closeSessionPopover();
-		this.closeAskUserPopover(true);
+		this.popoverHost.closeCurrent();
 		this.updateSendButtonState();
 		this.renderMessages();
 		this.composerInputEl?.focus();
@@ -818,68 +799,55 @@ export class PorygonView extends ItemView {
 	}
 
 	private toggleMentionPopover(composerEl: HTMLElement): void {
-		if (this.mentionPopoverEl) {
-			this.closeMentionPopover();
+		if (this.popoverHost.isOpen(POPOVER_MENTION)) {
+			this.popoverHost.closeCurrent();
 			return;
 		}
 
-		this.closeSlashCommandPopover();
 		this.renderMentionPopover(composerEl);
 	}
 
 	private toggleSlashCommandPopover(composerEl: HTMLElement): void {
-		if (this.slashCommandPopoverEl) {
-			this.closeSlashCommandPopover();
+		if (this.popoverHost.isOpen(POPOVER_SLASH)) {
+			this.popoverHost.closeCurrent();
 			return;
 		}
 
-		this.closeMentionPopover();
 		this.renderSlashCommandPopover(composerEl);
 	}
 
 	private renderMentionPopover(composerEl: HTMLElement): void {
-		this.closeMentionPopover();
-		this.closeFeedbackPopover();
-		const popover = composerEl.createDiv({ cls: "porygon-mention-popover" });
-		this.mentionPopoverEl = popover;
-		const panel = popover.createDiv({ cls: "porygon-mention-panel" });
-		const filterInput = panel.createEl("input", {
-			cls: "porygon-mention-filter",
-			attr: { type: "text", placeholder: "Filter notes and folders..." },
-		});
-		const notesEl = panel.createDiv({ cls: "porygon-mention-results" });
-		const renderNotes = () => this.renderMentionResults(notesEl, filterInput.value);
+		this.popoverHost.open(POPOVER_MENTION, composerEl, "porygon-mention-popover", ({ rootEl, requestClose }) => {
+			const panel = rootEl.createDiv({ cls: "porygon-mention-panel" });
+			const filterInput = panel.createEl("input", {
+				cls: "porygon-mention-filter",
+				attr: { type: "text", placeholder: "Filter notes and folders..." },
+			});
+			const notesEl = panel.createDiv({ cls: "porygon-mention-results" });
+			const renderNotes = () => this.renderMentionResults(notesEl, filterInput.value);
 
-		filterInput.addEventListener("input", () => {
-			this.selectedMentionResultIndex = 0;
+			filterInput.addEventListener("input", () => {
+				this.selectedMentionResultIndex = 0;
+				renderNotes();
+			});
 			renderNotes();
+			filterInput.focus();
+
+			return {
+				onKeydown: (event) => this.handleMentionPopoverKeydown(event, notesEl, filterInput.value, requestClose),
+				onClose: () => {
+					this.mentionResults = [];
+					this.selectedMentionResultIndex = 0;
+				},
+			};
 		});
-		this.mentionKeydownHandler = (event: KeyboardEvent) => this.handleMentionPopoverKeydown(event, notesEl, filterInput.value);
-		this.mentionPointerDownHandler = (event: PointerEvent) => this.handleMentionPointerDown(event);
-		window.addEventListener("keydown", this.mentionKeydownHandler, true);
-		window.addEventListener("pointerdown", this.mentionPointerDownHandler, true);
-		renderNotes();
-		filterInput.focus();
 	}
 
-	private handleMentionPointerDown(event: PointerEvent): void {
-		if (!this.mentionPopoverEl) {
-			return;
-		}
-
-		const target = event.target;
-		if (target instanceof Node && this.mentionPopoverEl.contains(target)) {
-			return;
-		}
-
-		this.closeMentionPopover();
-	}
-
-	private handleMentionPopoverKeydown(event: KeyboardEvent, notesEl: HTMLElement, query: string): void {
+	private handleMentionPopoverKeydown(event: KeyboardEvent, notesEl: HTMLElement, query: string, requestClose: () => void): void {
 		if (event.key === "Escape") {
 			event.preventDefault();
 			event.stopPropagation();
-			this.closeMentionPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 			return;
 		}
@@ -907,7 +875,7 @@ export class PorygonView extends ItemView {
 				return;
 			}
 
-			this.closeMentionPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 		}
 	}
@@ -1018,7 +986,7 @@ export class PorygonView extends ItemView {
 
 	private addMentionedItem(result: MentionSearchResult): void {
 		if (this.getUnavailableMentionPaths().has(result.path)) {
-			this.closeMentionPopover();
+			this.popoverHost.closeCurrent();
 			this.composerInputEl?.focus();
 			return;
 		}
@@ -1028,7 +996,7 @@ export class PorygonView extends ItemView {
 		this.insertMentionLink(mention);
 		this.renderMentionTags();
 		this.updateSendButtonState();
-		this.closeMentionPopover();
+		this.popoverHost.closeCurrent();
 		this.composerInputEl?.focus();
 	}
 
@@ -1079,54 +1047,39 @@ export class PorygonView extends ItemView {
 		this.composerInputEl?.focus();
 	}
 
-	private closeMentionPopover(): void {
-		if (this.mentionKeydownHandler) {
-			window.removeEventListener("keydown", this.mentionKeydownHandler, true);
-			this.mentionKeydownHandler = null;
-		}
-
-		if (this.mentionPointerDownHandler) {
-			window.removeEventListener("pointerdown", this.mentionPointerDownHandler, true);
-			this.mentionPointerDownHandler = null;
-		}
-
-		this.mentionPopoverEl?.remove();
-		this.mentionPopoverEl = null;
-		this.mentionResults = [];
-		this.selectedMentionResultIndex = 0;
-	}
-
 	private renderSlashCommandPopover(composerEl: HTMLElement): void {
-		this.closeSlashCommandPopover();
-		this.closeFeedbackPopover();
-		const popover = composerEl.createDiv({ cls: "porygon-slash-popover" });
-		this.slashCommandPopoverEl = popover;
-		const panel = popover.createDiv({ cls: "porygon-slash-panel" });
-		const filterInput = panel.createEl("input", {
-			cls: "porygon-slash-filter",
-			attr: { type: "text", placeholder: "Filter commands..." },
-		});
-		const commandsEl = panel.createDiv({ cls: "porygon-slash-results" });
-		const descriptionEl = panel.createDiv({ cls: "porygon-slash-description" });
-		const renderCommands = () => this.renderSlashCommandResults(commandsEl, descriptionEl, filterInput.value);
+		this.popoverHost.open(POPOVER_SLASH, composerEl, "porygon-slash-popover", ({ rootEl, requestClose }) => {
+			const panel = rootEl.createDiv({ cls: "porygon-slash-panel" });
+			const filterInput = panel.createEl("input", {
+				cls: "porygon-slash-filter",
+				attr: { type: "text", placeholder: "Filter commands..." },
+			});
+			const commandsEl = panel.createDiv({ cls: "porygon-slash-results" });
+			const descriptionEl = panel.createDiv({ cls: "porygon-slash-description" });
+			const renderCommands = () => this.renderSlashCommandResults(commandsEl, descriptionEl, filterInput.value);
 
-		filterInput.addEventListener("input", () => {
-			this.selectedSlashCommandIndex = 0;
+			filterInput.addEventListener("input", () => {
+				this.selectedSlashCommandIndex = 0;
+				renderCommands();
+			});
 			renderCommands();
+			filterInput.focus();
+
+			return {
+				onKeydown: (event) => this.handleSlashCommandPopoverKeydown(event, commandsEl, descriptionEl, filterInput.value, requestClose),
+				onClose: () => {
+					this.filteredSlashCommands = [];
+					this.selectedSlashCommandIndex = 0;
+				},
+			};
 		});
-		this.slashCommandKeydownHandler = (event: KeyboardEvent) => this.handleSlashCommandPopoverKeydown(event, commandsEl, descriptionEl, filterInput.value);
-		this.slashCommandPointerDownHandler = (event: PointerEvent) => this.handleSlashCommandPointerDown(event);
-		window.addEventListener("keydown", this.slashCommandKeydownHandler, true);
-		window.addEventListener("pointerdown", this.slashCommandPointerDownHandler, true);
-		renderCommands();
-		filterInput.focus();
 	}
 
-	private handleSlashCommandPopoverKeydown(event: KeyboardEvent, commandsEl: HTMLElement, descriptionEl: HTMLElement, query: string): void {
+	private handleSlashCommandPopoverKeydown(event: KeyboardEvent, commandsEl: HTMLElement, descriptionEl: HTMLElement, query: string, requestClose: () => void): void {
 		if (event.key === "Escape") {
 			event.preventDefault();
 			event.stopPropagation();
-			this.closeSlashCommandPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 			return;
 		}
@@ -1154,23 +1107,11 @@ export class PorygonView extends ItemView {
 				return;
 			}
 
-			this.closeSlashCommandPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 		}
 	}
 
-	private handleSlashCommandPointerDown(event: PointerEvent): void {
-		if (!this.slashCommandPopoverEl) {
-			return;
-		}
-
-		const target = event.target;
-		if (target instanceof Node && this.slashCommandPopoverEl.contains(target)) {
-			return;
-		}
-
-		this.closeSlashCommandPopover();
-	}
 
 	private renderSlashCommandResults(containerEl: HTMLElement, descriptionEl: HTMLElement, query: string): void {
 		containerEl.empty();
@@ -1239,7 +1180,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private selectSlashCommand(command: SlashCommand): void {
-		this.closeSlashCommandPopover();
+		this.popoverHost.closeCurrent();
 		this.composerInputEl?.focus();
 
 		if (command.id === "new") {
@@ -1266,31 +1207,32 @@ export class PorygonView extends ItemView {
 	}
 
 	private async renderSessionPopover(composerEl: HTMLElement): Promise<void> {
-		this.closeSessionPopover();
-		this.closeMentionPopover();
-		this.closeSlashCommandPopover();
-		this.closeFeedbackPopover();
-		const popover = composerEl.createDiv({ cls: "porygon-session-popover" });
-		this.sessionPopoverEl = popover;
-		const panel = popover.createDiv({ cls: "porygon-session-panel" });
-		const filterInput = panel.createEl("input", {
-			cls: "porygon-session-filter",
-			attr: { type: "text", placeholder: "Filter sessions..." },
-		});
-		const sessionsEl = panel.createDiv({ cls: "porygon-session-results" });
 		this.allSessionSummaries = await this.getSessionSummaries();
-		const renderSessions = () => this.renderSessionResults(sessionsEl, filterInput.value);
+		this.popoverHost.open(POPOVER_SESSION, composerEl, "porygon-session-popover", ({ rootEl, requestClose }) => {
+			const panel = rootEl.createDiv({ cls: "porygon-session-panel" });
+			const filterInput = panel.createEl("input", {
+				cls: "porygon-session-filter",
+				attr: { type: "text", placeholder: "Filter sessions..." },
+			});
+			const sessionsEl = panel.createDiv({ cls: "porygon-session-results" });
+			const renderSessions = () => this.renderSessionResults(sessionsEl, filterInput.value);
 
-		filterInput.addEventListener("input", () => {
-			this.selectedSessionIndex = 0;
+			filterInput.addEventListener("input", () => {
+				this.selectedSessionIndex = 0;
+				renderSessions();
+			});
 			renderSessions();
+			filterInput.focus();
+
+			return {
+				onKeydown: (event) => this.handleSessionPopoverKeydown(event, sessionsEl, filterInput.value, requestClose),
+				onClose: () => {
+					this.sessionResults = [];
+					this.allSessionSummaries = [];
+					this.selectedSessionIndex = 0;
+				},
+			};
 		});
-		this.sessionKeydownHandler = (event: KeyboardEvent) => this.handleSessionPopoverKeydown(event, sessionsEl, filterInput.value);
-		this.sessionPointerDownHandler = (event: PointerEvent) => this.handleSessionPointerDown(event);
-		window.addEventListener("keydown", this.sessionKeydownHandler, true);
-		window.addEventListener("pointerdown", this.sessionPointerDownHandler, true);
-		renderSessions();
-		filterInput.focus();
 	}
 
 	private async getSessionSummaries(): Promise<SessionSummary[]> {
@@ -1369,11 +1311,11 @@ export class PorygonView extends ItemView {
 			session.file.basename.toLowerCase().includes(normalizedQuery);
 	}
 
-	private handleSessionPopoverKeydown(event: KeyboardEvent, containerEl: HTMLElement, query: string): void {
+	private handleSessionPopoverKeydown(event: KeyboardEvent, containerEl: HTMLElement, query: string, requestClose: () => void): void {
 		if (event.key === "Escape") {
 			event.preventDefault();
 			event.stopPropagation();
-			this.closeSessionPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 			return;
 		}
@@ -1401,7 +1343,7 @@ export class PorygonView extends ItemView {
 				return;
 			}
 
-			this.closeSessionPopover();
+			requestClose();
 			this.composerInputEl?.focus();
 		}
 	}
@@ -1417,54 +1359,6 @@ export class PorygonView extends ItemView {
 		selectedEl?.scrollIntoView({ block: "nearest" });
 	}
 
-	private handleSessionPointerDown(event: PointerEvent): void {
-		if (!this.sessionPopoverEl) {
-			return;
-		}
-
-		const target = event.target;
-		if (target instanceof Node && this.sessionPopoverEl.contains(target)) {
-			return;
-		}
-
-		this.closeSessionPopover();
-	}
-
-	private closeSlashCommandPopover(): void {
-		if (this.slashCommandKeydownHandler) {
-			window.removeEventListener("keydown", this.slashCommandKeydownHandler, true);
-			this.slashCommandKeydownHandler = null;
-		}
-
-		if (this.slashCommandPointerDownHandler) {
-			window.removeEventListener("pointerdown", this.slashCommandPointerDownHandler, true);
-			this.slashCommandPointerDownHandler = null;
-		}
-
-		this.slashCommandPopoverEl?.remove();
-		this.slashCommandPopoverEl = null;
-		this.filteredSlashCommands = [];
-		this.selectedSlashCommandIndex = 0;
-	}
-
-	private closeSessionPopover(): void {
-		if (this.sessionKeydownHandler) {
-			window.removeEventListener("keydown", this.sessionKeydownHandler, true);
-			this.sessionKeydownHandler = null;
-		}
-
-		if (this.sessionPointerDownHandler) {
-			window.removeEventListener("pointerdown", this.sessionPointerDownHandler, true);
-			this.sessionPointerDownHandler = null;
-		}
-
-		this.sessionPopoverEl?.remove();
-		this.sessionPopoverEl = null;
-		this.sessionResults = [];
-		this.allSessionSummaries = [];
-		this.selectedSessionIndex = 0;
-	}
-
 	private handleAskUser(payload: AskUserInterruptPayload): Promise<string> {
 		return new Promise((resolve) => {
 			this.askResolve = resolve;
@@ -1478,138 +1372,125 @@ export class PorygonView extends ItemView {
 	}
 
 	private renderAskUserPopover(composerEl: HTMLElement, payload: AskUserInterruptPayload): void {
-		this.closeAskUserPopover(false);
-		this.closeMentionPopover();
-		this.closeSlashCommandPopover();
-		this.closeSessionPopover();
-		this.closeFeedbackPopover();
+		this.popoverHost.open(POPOVER_ASK, composerEl, "porygon-ask-popover", ({ rootEl }) => {
+			const panel = rootEl.createDiv({ cls: "porygon-ask-panel" });
+			panel.createDiv({ cls: "porygon-ask-question", text: payload.question });
 
-		const popover = composerEl.createDiv({ cls: "porygon-ask-popover" });
-		this.askPopoverEl = popover;
-		const panel = popover.createDiv({ cls: "porygon-ask-panel" });
-		panel.createDiv({ cls: "porygon-ask-question", text: payload.question });
-
-		const optionsEl = panel.createDiv({ cls: "porygon-ask-options" });
-		const optionButtons: HTMLButtonElement[] = [];
-		let selectedIndex = 0;
-		const setSelected = (next: number) => {
-			selectedIndex = (next + optionButtons.length) % optionButtons.length;
-			optionButtons.forEach((btn, i) => btn.toggleClass("is-selected", i === selectedIndex));
-		};
-		payload.options.forEach((option, index) => {
-			const button = optionsEl.createEl("button", {
-				cls: "porygon-ask-option",
-				attr: { type: "button", title: option, "aria-label": option },
-			});
-			button.createSpan({ cls: "porygon-ask-option-index", text: String(index + 1) });
-			button.createSpan({ cls: "porygon-ask-option-label", text: option });
-			button.addEventListener("mouseenter", () => setSelected(index));
-			button.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				this.resolveAskUser(option);
-			});
-			optionButtons.push(button);
-		});
-		setSelected(0);
-
-		const inputRow = panel.createDiv({ cls: "porygon-ask-input-row" });
-		const inputIcon = inputRow.createDiv({ cls: "porygon-ask-input-icon" });
-		setIcon(inputIcon, "pencil");
-		const input = inputRow.createEl("input", {
-			cls: "porygon-ask-input",
-			attr: { type: "text", placeholder: "Something else..." },
-		});
-		const submitButton = inputRow.createEl("button", {
-			cls: "porygon-send-button is-healthy",
-			attr: { type: "button", title: "Send reply", "aria-label": "Send reply" },
-		});
-		setIcon(submitButton, "send-horizontal");
-
-		const submit = () => {
-			const value = input.value.trim();
-			if (!value) {
-				return;
-			}
-			this.resolveAskUser(value);
-		};
-
-		submitButton.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			submit();
-		});
-
-		input.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" && !event.shiftKey) {
-				event.preventDefault();
-				if (input.value.trim()) {
-					submit();
-				} else {
-					const selected = payload.options[selectedIndex];
-					if (selected) {
-						this.resolveAskUser(selected);
-					}
-				}
-				return;
-			}
-
-			if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !input.value) {
-				event.preventDefault();
-				setSelected(selectedIndex + (event.key === "ArrowDown" ? 1 : -1));
-				return;
-			}
-
-			if (event.key >= "1" && event.key <= "9" && !input.value) {
-				const numeric = Number(event.key);
-				if (numeric <= payload.options.length) {
+			const optionsEl = panel.createDiv({ cls: "porygon-ask-options" });
+			const optionButtons: HTMLButtonElement[] = [];
+			let selectedIndex = 0;
+			const setSelected = (next: number) => {
+				selectedIndex = (next + optionButtons.length) % optionButtons.length;
+				optionButtons.forEach((btn, i) => btn.toggleClass("is-selected", i === selectedIndex));
+			};
+			payload.options.forEach((option, index) => {
+				const button = optionsEl.createEl("button", {
+					cls: "porygon-ask-option",
+					attr: { type: "button", title: option, "aria-label": option },
+				});
+				button.createSpan({ cls: "porygon-ask-option-index", text: String(index + 1) });
+				button.createSpan({ cls: "porygon-ask-option-label", text: option });
+				button.addEventListener("mouseenter", () => setSelected(index));
+				button.addEventListener("click", (event) => {
 					event.preventDefault();
-					const option = payload.options[numeric - 1];
-					if (option) {
-						this.resolveAskUser(option);
-					}
+					event.stopPropagation();
+					this.resolveAskUser(option);
+				});
+				optionButtons.push(button);
+			});
+			setSelected(0);
+
+			const inputRow = panel.createDiv({ cls: "porygon-ask-input-row" });
+			const inputIcon = inputRow.createDiv({ cls: "porygon-ask-input-icon" });
+			setIcon(inputIcon, "pencil");
+			const input = inputRow.createEl("input", {
+				cls: "porygon-ask-input",
+				attr: { type: "text", placeholder: "Something else..." },
+			});
+			const submitButton = inputRow.createEl("button", {
+				cls: "porygon-send-button is-healthy",
+				attr: { type: "button", title: "Send reply", "aria-label": "Send reply" },
+			});
+			setIcon(submitButton, "send-horizontal");
+
+			const submit = () => {
+				const value = input.value.trim();
+				if (!value) {
+					return;
 				}
-			}
-		});
+				this.resolveAskUser(value);
+			};
 
-		this.askKeydownHandler = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || !this.askPopoverEl) {
-				return;
-			}
-
-			const target = event.target;
-			if (target instanceof HTMLElement && this.askPopoverEl.contains(target)) {
+			submitButton.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
-				this.resolveAskUser("User ignored the question/approval");
-			}
-		};
-		window.addEventListener("keydown", this.askKeydownHandler, true);
-		input.focus();
+				submit();
+			});
+
+			input.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					if (input.value.trim()) {
+						submit();
+					} else {
+						const selected = payload.options[selectedIndex];
+						if (selected) {
+							this.resolveAskUser(selected);
+						}
+					}
+					return;
+				}
+
+				if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !input.value) {
+					event.preventDefault();
+					setSelected(selectedIndex + (event.key === "ArrowDown" ? 1 : -1));
+					return;
+				}
+
+				if (event.key >= "1" && event.key <= "9" && !input.value) {
+					const numeric = Number(event.key);
+					if (numeric <= payload.options.length) {
+						event.preventDefault();
+						const option = payload.options[numeric - 1];
+						if (option) {
+							this.resolveAskUser(option);
+						}
+					}
+				}
+			});
+
+			input.focus();
+
+			return {
+				closeOnOutsideClick: false,
+				onKeydown: (event) => {
+					if (event.key !== "Escape") {
+						return;
+					}
+					const target = event.target;
+					if (target instanceof HTMLElement && rootEl.contains(target)) {
+						event.preventDefault();
+						event.stopPropagation();
+						this.resolveAskUser("User ignored the question/approval");
+					}
+				},
+				onClose: () => {
+					if (this.askResolve) {
+						const resolve = this.askResolve;
+						this.askResolve = null;
+						resolve("");
+					}
+				},
+			};
+		});
 	}
 
 	private resolveAskUser(reply: string): void {
 		const resolve = this.askResolve;
 		this.askResolve = null;
-		this.closeAskUserPopover(false);
+		this.popoverHost.closeCurrent();
 		resolve?.(reply);
 		this.composerInputEl?.focus();
-	}
-
-	private closeAskUserPopover(resolveEmpty: boolean): void {
-		if (this.askKeydownHandler) {
-			window.removeEventListener("keydown", this.askKeydownHandler, true);
-			this.askKeydownHandler = null;
-		}
-
-		this.askPopoverEl?.remove();
-		this.askPopoverEl = null;
-
-		if (resolveEmpty && this.askResolve) {
-			const resolve = this.askResolve;
-			this.askResolve = null;
-			resolve("");
-		}
 	}
 
 	private showFeedback(type: FeedbackType, markdown: string, cta?: FeedbackCallToAction): void {
@@ -1617,80 +1498,33 @@ export class PorygonView extends ItemView {
 			return;
 		}
 
-		this.closeFeedbackPopover();
-		this.closeMentionPopover();
-		this.closeSlashCommandPopover();
-		this.closeSessionPopover();
+		this.popoverHost.open(POPOVER_FEEDBACK, this.composerEl, `porygon-feedback-popover is-${type}`, ({ rootEl, requestClose }) => {
+			const panel = rootEl.createDiv({ cls: "porygon-feedback-panel" });
 
-		const popover = this.composerEl.createDiv({ cls: `porygon-feedback-popover is-${type}` });
-		this.feedbackPopoverEl = popover;
-		const panel = popover.createDiv({ cls: "porygon-feedback-panel" });
+			const iconEl = panel.createDiv({ cls: "porygon-feedback-icon" });
+			setIcon(iconEl, FEEDBACK_ICONS[type]);
 
-		const iconEl = panel.createDiv({ cls: "porygon-feedback-icon" });
-		setIcon(iconEl, FEEDBACK_ICONS[type]);
+			const messageEl = panel.createDiv({ cls: "porygon-feedback-message" });
+			void MarkdownRenderer.render(this.plugin.app, markdown, messageEl, "/", this);
 
-		const messageEl = panel.createDiv({ cls: "porygon-feedback-message" });
-		void MarkdownRenderer.render(this.plugin.app, markdown, messageEl, "/", this);
-
-		if (cta) {
-			const ctaButton = panel.createEl("button", {
-				cls: "porygon-feedback-cta",
-				text: cta.label,
-				attr: { type: "button", title: cta.label, "aria-label": cta.label },
-			});
-			ctaButton.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				cta.action();
-				this.closeFeedbackPopover();
-			});
-		}
-
-		this.feedbackKeydownHandler = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || !this.feedbackPopoverEl) {
-				return;
+			if (cta) {
+				const ctaButton = panel.createEl("button", {
+					cls: "porygon-feedback-cta",
+					text: cta.label,
+					attr: { type: "button", title: cta.label, "aria-label": cta.label },
+				});
+				ctaButton.addEventListener("click", (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					cta.action();
+					requestClose();
+				});
 			}
-			event.preventDefault();
-			event.stopPropagation();
-			this.closeFeedbackPopover();
-			this.composerInputEl?.focus();
-		};
-		this.feedbackPointerDownHandler = (event: PointerEvent) => {
-			if (!this.feedbackPopoverEl) {
-				return;
-			}
-			const target = event.target;
-			if (target instanceof Node && this.feedbackPopoverEl.contains(target)) {
-				return;
-			}
-			this.closeFeedbackPopover();
-		};
-		window.addEventListener("keydown", this.feedbackKeydownHandler, true);
-		window.addEventListener("pointerdown", this.feedbackPointerDownHandler, true);
 
-		if (type !== "error") {
-			this.feedbackDismissTimer = window.setTimeout(() => this.closeFeedbackPopover(), FEEDBACK_AUTO_DISMISS_MS);
-		}
-	}
-
-	private closeFeedbackPopover(): void {
-		if (this.feedbackDismissTimer !== null) {
-			window.clearTimeout(this.feedbackDismissTimer);
-			this.feedbackDismissTimer = null;
-		}
-
-		if (this.feedbackKeydownHandler) {
-			window.removeEventListener("keydown", this.feedbackKeydownHandler, true);
-			this.feedbackKeydownHandler = null;
-		}
-
-		if (this.feedbackPointerDownHandler) {
-			window.removeEventListener("pointerdown", this.feedbackPointerDownHandler, true);
-			this.feedbackPointerDownHandler = null;
-		}
-
-		this.feedbackPopoverEl?.remove();
-		this.feedbackPopoverEl = null;
+			return {
+				autoDismissMs: type === "error" ? undefined : FEEDBACK_AUTO_DISMISS_MS,
+			};
+		});
 	}
 
 	private getUnavailableMentionPaths(): Set<string> {
@@ -1760,7 +1594,7 @@ export class PorygonView extends ItemView {
 		this.composerInputEl.value = "";
 		this.selectedMentions = [];
 		this.renderMentionTags();
-		this.closeMentionPopover();
+		this.popoverHost.closeCurrent();
 		const userMessage: ChatMessage = { role: "user", content, createdAt, mentions: mentionSnapshots };
 		this.messages.push(userMessage);
 		const fileMessages = await this.createFileContextMessages(mentionSnapshots);
@@ -2111,7 +1945,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private async selectSession(session: SessionSummary): Promise<void> {
-		this.closeSessionPopover();
+		this.popoverHost.closeCurrent();
 		if (this.hasConversationContent()) {
 			const decision = await this.confirmSaveBeforeNewConversation();
 			if (decision === "cancel") {
@@ -2144,8 +1978,7 @@ export class PorygonView extends ItemView {
 				this.composerInputEl.value = "";
 			}
 			this.renderMentionTags();
-			this.closeMentionPopover();
-			this.closeSlashCommandPopover();
+			this.popoverHost.closeCurrent();
 			this.updateSendButtonState();
 			this.renderMessages();
 			const lastUserMessage = [...this.messages].reverse().find((m) => m.role === "user");
