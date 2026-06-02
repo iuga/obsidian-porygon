@@ -97,7 +97,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
 
 const PORYGON_SESSIONS_FOLDER = "porygon/sessions";
 const PORYGON_FRONTMATTER_DELIMITER = "---";
-const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? - / for commands - @ for mentions";
+const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? • / for commands • @ for mentions";
 const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
 	"What shall we make clearer today?",
 	"Bring me a thought, I’ll bring a plan",
