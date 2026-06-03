@@ -470,6 +470,14 @@
 	opacity: 0.5;
 }
 
+.porygon-send-button.porygon-send-button.is-streaming {
+	color: var(--text-normal);
+}
+
+.porygon-send-button.porygon-send-button.is-streaming svg {
+	fill: currentColor;
+}
+
 .porygon-mention-popover,
 .porygon-slash-popover,
 .porygon-session-popover,

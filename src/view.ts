@@ -165,6 +165,7 @@ export class PorygonView extends ItemView {
 	// message is the current target so deltas can be routed there and
 	// finalizeStreaming() can drain it.
 	private streamingMessage: ChatMessage | null = null;
+	private streamAbortController: AbortController | null = null;
 	private chatList: ChatList | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PorygonPlugin) {
@@ -362,6 +363,10 @@ export class PorygonView extends ItemView {
 			void this.sendCurrentMessage();
 		});
 		this.sendButtonEl.addEventListener("click", () => {
+			if (this.isStreaming) {
+				this.cancelStreaming();
+				return;
+			}
 			void this.sendCurrentMessage();
 		});
 	}
@@ -1545,10 +1550,21 @@ export class PorygonView extends ItemView {
 		this.sendButtonEl.toggleClass("is-healthy", this.isHealthy);
 		this.sendButtonEl.toggleClass("is-unhealthy", !this.isHealthy);
 		this.composerEl?.toggleClass("is-unhealthy", !this.isHealthy);
+
+		if (this.isStreaming) {
+			this.sendButtonEl.toggleClass("is-streaming", true);
+			setIcon(this.sendButtonEl, "square");
+			this.sendButtonEl.disabled = false;
+			this.sendButtonEl.title = "Stop response";
+			this.sendButtonEl.ariaLabel = "Stop response";
+			return;
+		}
+
+		this.sendButtonEl.toggleClass("is-streaming", false);
 		setIcon(this.sendButtonEl, this.isHealthy ? "send-horizontal" : "unlink");
 
 		const hasMessage = this.composerInputEl.value.trim().length > 0 || this.selectedMentions.length > 0;
-		this.sendButtonEl.disabled = !hasMessage || this.isStreaming || this.isCheckingHealth;
+		this.sendButtonEl.disabled = !hasMessage || this.isCheckingHealth;
 		const tooltip = this.getSendButtonTooltip(hasMessage);
 		this.sendButtonEl.title = tooltip;
 		this.sendButtonEl.ariaLabel = tooltip;
@@ -1603,6 +1619,7 @@ export class PorygonView extends ItemView {
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
 		this.streamingMessage = porygonMessage;
+		this.streamAbortController = new AbortController();
 		this.updateSendButtonState();
 		// One reconcile to mount the new user / file / porygon rows. All
 		// further per-delta work goes through ChatList.notifyStreamingDelta
@@ -1621,9 +1638,9 @@ export class PorygonView extends ItemView {
 			? this.buildAgentMessages(porygonMessage)
 			: this.buildAgentMessagesForLatestTurn(porygonMessage);
 
+		let thinkingStartedAt: number | null = null;
+		let hasStartedStreamingContent = false;
 		try {
-			let thinkingStartedAt: number | null = null;
-			let hasStartedStreamingContent = false;
 			let hasPlaceholderContent = true;
 			const collapseThinkingAndTools = () => {
 				// Collapse thinking + tools as soon as the answer starts
@@ -1673,6 +1690,7 @@ export class PorygonView extends ItemView {
 						await this.plugin.saveSettings();
 					},
 				},
+				signal: this.streamAbortController?.signal,
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();
@@ -1710,12 +1728,17 @@ export class PorygonView extends ItemView {
 			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
 			this.chatList?.notifyChanged(porygonMessage);
 		} catch (error) {
-			await this.finalizeStreaming(porygonMessage);
-			this.messages = this.messages.filter((message) => message !== porygonMessage);
-			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
-			this.renderMessages();
+			if (error instanceof Error && error.name === "AbortError") {
+				await this.handleStreamCancelled(porygonMessage, hasStartedStreamingContent, thinkingStartedAt);
+			} else {
+				await this.finalizeStreaming(porygonMessage);
+				this.messages = this.messages.filter((message) => message !== porygonMessage);
+				this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
+				this.renderMessages();
+			}
 		} finally {
 			this.isStreaming = false;
+			this.streamAbortController = null;
 			this.updateSendButtonState();
 		}
 	}
@@ -1729,6 +1752,37 @@ export class PorygonView extends ItemView {
 		}
 		message.isStreaming = false;
 		this.streamingMessage = null;
+	}
+
+	private cancelStreaming(): void {
+		this.streamAbortController?.abort();
+	}
+
+	// Connecting-phase cancel (no deltas yet): drop the placeholder bubble
+	// entirely like ChatGPT. Mid-stream cancel: keep the partial reply and
+	// flag it so the row renders a "Stopped" marker.
+	private async handleStreamCancelled(
+		porygonMessage: ChatMessage,
+		hasStartedStreamingContent: boolean,
+		thinkingStartedAt: number | null,
+	): Promise<void> {
+		await this.finalizeStreaming(porygonMessage);
+		const hasPartialReply = hasStartedStreamingContent
+			|| !!porygonMessage.thinking
+			|| (porygonMessage.toolIntents?.length ?? 0) > 0;
+
+		if (!hasPartialReply) {
+			this.messages = this.messages.filter((message) => message !== porygonMessage);
+			this.renderMessages();
+			return;
+		}
+
+		this.isSessionMemoryPrimed = true;
+		porygonMessage.isCancelled = true;
+		if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
+			porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
+		}
+		this.chatList?.notifyChanged(porygonMessage);
 	}
 
 	private getThinkingDurationSeconds(startedAt: number): number {

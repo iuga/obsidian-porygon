@@ -61,6 +61,7 @@ export interface LocalAgentOptions {
 	skills: SkillsService;
 	sessionId: string;
 	memoriesStore: MemoriesStore;
+	signal?: AbortSignal;
 }
 
 export interface LocalAgentResponse {
@@ -98,7 +99,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	}
 	const activeAgent = agent;
 
-	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const };
+	const config = { configurable: { thread_id: options.sessionId }, streamMode: "messages" as const, signal: options.signal };
 	const turnMessages = options.messages.map(toLangChainMessage);
 
 	const acc = createStreamAccumulator();
