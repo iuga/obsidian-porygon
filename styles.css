@@ -470,6 +470,8 @@
 	opacity: 0.5;
 }
 
+/* Class doubled to raise specificity above the base .porygon-send-button
+   color/disabled rules so the stop state wins without !important. */
 .porygon-send-button.porygon-send-button.is-streaming {
 	color: var(--text-normal);
 }

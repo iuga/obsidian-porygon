@@ -1690,7 +1690,7 @@ export class PorygonView extends ItemView {
 						await this.plugin.saveSettings();
 					},
 				},
-				signal: this.streamAbortController?.signal,
+				signal: this.streamAbortController.signal,
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();
@@ -1728,7 +1728,7 @@ export class PorygonView extends ItemView {
 			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
 			this.chatList?.notifyChanged(porygonMessage);
 		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
+			if (this.streamAbortController?.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
 				await this.handleStreamCancelled(porygonMessage, hasStartedStreamingContent, thinkingStartedAt);
 			} else {
 				await this.finalizeStreaming(porygonMessage);
@@ -1759,8 +1759,7 @@ export class PorygonView extends ItemView {
 	}
 
 	// Connecting-phase cancel (no deltas yet): drop the placeholder bubble
-	// entirely like ChatGPT. Mid-stream cancel: keep the partial reply and
-	// flag it so the row renders a "Stopped" marker.
+	// entirely like ChatGPT. Mid-stream cancel: keep the partial reply as-is.
 	private async handleStreamCancelled(
 		porygonMessage: ChatMessage,
 		hasStartedStreamingContent: boolean,
@@ -1778,7 +1777,6 @@ export class PorygonView extends ItemView {
 		}
 
 		this.isSessionMemoryPrimed = true;
-		porygonMessage.isCancelled = true;
 		if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
 			porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
 		}

@@ -29,9 +29,6 @@ export interface ChatMessage {
 	// Flipped off in finalizeStreaming() so the row renders through the
 	// historical path on subsequent updates.
 	isStreaming?: boolean;
-	// True when the user stopped the response mid-stream; the partial
-	// content is kept and a "Stopped" marker is rendered.
-	isCancelled?: boolean;
 }
 
 export type StreamingDeltaKind = "content" | "thinking" | "tool";
