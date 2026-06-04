@@ -155,6 +155,7 @@ export class PorygonView extends ItemView {
 	private askResolve: ((reply: string) => void) | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
+	private autosaveQueue: Promise<void> = Promise.resolve();
 	private isSessionMemoryPrimed = false;
 	private isStreaming = false;
 	private isCheckingHealth = false;
@@ -1140,7 +1141,8 @@ export class PorygonView extends ItemView {
 
 		return SLASH_COMMANDS.filter((command) =>
 			command.label.toLowerCase().includes(normalizedQuery) ||
-			command.syntax.toLowerCase().includes(normalizedQuery)
+			command.syntax.toLowerCase().includes(normalizedQuery) ||
+			command.description.toLowerCase().includes(normalizedQuery)
 		);
 	}
 
@@ -1832,16 +1834,30 @@ export class PorygonView extends ItemView {
 		return null;
 	}
 
-	private async autosaveSession(): Promise<void> {
+	// Serialize autosaves so a slow title generation on one turn can't let a
+	// later turn's save overtake it and write stale content (or run concurrently).
+	private autosaveSession(): Promise<void> {
+		this.autosaveQueue = this.autosaveQueue
+			.catch(() => undefined)
+			.then(() => this.runAutosave());
+		return this.autosaveQueue;
+	}
+
+	private async runAutosave(): Promise<void> {
 		const visibleMessages = this.messages.filter((message): message is ChatMessage & { role: "user" | "porygon" } => message.role === "user" || message.role === "porygon");
 		if (visibleMessages.length === 0) {
 			return;
 		}
 
+		// The id is pinned to the conversation when the user first sends a
+		// message, so autosave only reads it — it never mints a new one.
+		const sessionId = this.currentSessionId;
+		if (!sessionId) {
+			return;
+		}
+
 		try {
-			const sessionId = this.currentSessionId ?? crypto.randomUUID();
 			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
-			this.currentSessionId = sessionId;
 			this.currentSessionTitle = title;
 			const filename = `${PORYGON_SESSIONS_FOLDER}/${sessionId}.md`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
