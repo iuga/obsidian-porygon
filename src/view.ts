@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, ItemView, MarkdownRenderer, Modal, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { getFrontMatterInfo, ItemView, MarkdownRenderer, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
@@ -35,7 +35,7 @@ interface MentionSearchResult {
 	files: TFile[];
 }
 
-type SlashCommandId = "new" | "save" | "sessions";
+type SlashCommandId = "new" | "resume";
 
 interface SlashCommand {
 	id: SlashCommandId;
@@ -113,8 +113,7 @@ const SETTING_STEPS: SettingStep[] = [
 
 const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "new", label: "New session", syntax: "/new", description: "Start a new session.", icon: "circle-plus" },
-	{ id: "save", label: "Save session", syntax: "/save", description: "Save this session to a note.", icon: "save" },
-	{ id: "sessions", label: "Sessions", syntax: "/sessions", description: "Load a saved session.", icon: "messages-square" },
+	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume a saved conversation.", icon: "messages-square" },
 ];
 
 const PORYGON_SESSIONS_FOLDER = "porygon/sessions";
@@ -156,6 +155,7 @@ export class PorygonView extends ItemView {
 	private askResolve: ((reply: string) => void) | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
+	private autosaveQueue: Promise<void> = Promise.resolve();
 	private isSessionMemoryPrimed = false;
 	private isStreaming = false;
 	private isCheckingHealth = false;
@@ -730,32 +730,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private async handleNewConversationCommand(): Promise<void> {
-		if (!this.hasConversationContent()) {
-			this.startNewChat();
-			return;
-		}
-
-		const decision = await this.confirmSaveBeforeNewConversation();
-		if (decision === "cancel") {
-			this.composerInputEl?.focus();
-			return;
-		}
-
-		if (decision === "yes") {
-			await this.saveSession();
-		}
-
 		this.startNewChat();
-	}
-
-	private hasConversationContent(): boolean {
-		return this.messages.some((message) => (message.role === "user" || message.role === "porygon") && message.content.trim().length > 0);
-	}
-
-	private confirmSaveBeforeNewConversation(): Promise<"yes" | "no" | "cancel"> {
-		return new Promise((resolve) => {
-			new SaveBeforeNewConversationModal(this.plugin, resolve).open();
-		});
 	}
 
 	private startNewChat(): void {
@@ -1060,8 +1035,7 @@ export class PorygonView extends ItemView {
 				attr: { type: "text", placeholder: "Filter commands..." },
 			});
 			const commandsEl = panel.createDiv({ cls: "porygon-slash-results" });
-			const descriptionEl = panel.createDiv({ cls: "porygon-slash-description" });
-			const renderCommands = () => this.renderSlashCommandResults(commandsEl, descriptionEl, filterInput.value);
+			const renderCommands = () => this.renderSlashCommandResults(commandsEl, filterInput.value);
 
 			filterInput.addEventListener("input", () => {
 				this.selectedSlashCommandIndex = 0;
@@ -1071,7 +1045,7 @@ export class PorygonView extends ItemView {
 			filterInput.focus();
 
 			return {
-				onKeydown: (event) => this.handleSlashCommandPopoverKeydown(event, commandsEl, descriptionEl, filterInput.value, requestClose),
+				onKeydown: (event) => this.handleSlashCommandPopoverKeydown(event, commandsEl, filterInput.value, requestClose),
 				onClose: () => {
 					this.filteredSlashCommands = [];
 					this.selectedSlashCommandIndex = 0;
@@ -1080,7 +1054,7 @@ export class PorygonView extends ItemView {
 		});
 	}
 
-	private handleSlashCommandPopoverKeydown(event: KeyboardEvent, commandsEl: HTMLElement, descriptionEl: HTMLElement, query: string, requestClose: () => void): void {
+	private handleSlashCommandPopoverKeydown(event: KeyboardEvent, commandsEl: HTMLElement, query: string, requestClose: () => void): void {
 		if (event.key === "Escape") {
 			event.preventDefault();
 			event.stopPropagation();
@@ -1092,14 +1066,14 @@ export class PorygonView extends ItemView {
 		if (event.key === "ArrowDown") {
 			event.preventDefault();
 			event.stopPropagation();
-			this.moveSlashCommandSelection(1, commandsEl, descriptionEl, query);
+			this.moveSlashCommandSelection(1, commandsEl, query);
 			return;
 		}
 
 		if (event.key === "ArrowUp") {
 			event.preventDefault();
 			event.stopPropagation();
-			this.moveSlashCommandSelection(-1, commandsEl, descriptionEl, query);
+			this.moveSlashCommandSelection(-1, commandsEl, query);
 			return;
 		}
 
@@ -1118,14 +1092,13 @@ export class PorygonView extends ItemView {
 	}
 
 
-	private renderSlashCommandResults(containerEl: HTMLElement, descriptionEl: HTMLElement, query: string): void {
+	private renderSlashCommandResults(containerEl: HTMLElement, query: string): void {
 		containerEl.empty();
 		const commands = this.getSlashCommands(query);
 		this.filteredSlashCommands = commands;
 		this.selectedSlashCommandIndex = Math.min(this.selectedSlashCommandIndex, Math.max(commands.length - 1, 0));
 
 		if (commands.length === 0) {
-			descriptionEl.empty();
 			containerEl.createDiv({ cls: "porygon-slash-empty", text: "No commands found" });
 			return;
 		}
@@ -1140,34 +1113,22 @@ export class PorygonView extends ItemView {
 			setIcon(iconEl, command.icon);
 			const textEl = commandButton.createSpan({ cls: "porygon-slash-result-text" });
 			textEl.createSpan({ cls: "porygon-slash-result-syntax", text: command.syntax });
-			textEl.createSpan({ cls: "porygon-slash-result-label", text: command.label });
+			textEl.createSpan({ cls: "porygon-slash-result-label", text: command.description });
 			commandButton.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
 				this.selectSlashCommand(command);
 			});
 		});
-
-		this.renderSlashCommandDescription(descriptionEl);
 	}
 
-	private renderSlashCommandDescription(descriptionEl: HTMLElement): void {
-		descriptionEl.empty();
-		const selectedCommand = this.filteredSlashCommands[this.selectedSlashCommandIndex];
-		if (!selectedCommand) {
-			return;
-		}
-
-		descriptionEl.setText(selectedCommand.description);
-	}
-
-	private moveSlashCommandSelection(direction: number, containerEl: HTMLElement, descriptionEl: HTMLElement, query: string): void {
+	private moveSlashCommandSelection(direction: number, containerEl: HTMLElement, query: string): void {
 		if (this.filteredSlashCommands.length === 0) {
 			return;
 		}
 
 		this.selectedSlashCommandIndex = (this.selectedSlashCommandIndex + direction + this.filteredSlashCommands.length) % this.filteredSlashCommands.length;
-		this.renderSlashCommandResults(containerEl, descriptionEl, query);
+		this.renderSlashCommandResults(containerEl, query);
 		const selectedEl = containerEl.querySelector<HTMLElement>(".porygon-slash-result.is-selected");
 		selectedEl?.scrollIntoView({ block: "nearest" });
 	}
@@ -1180,7 +1141,8 @@ export class PorygonView extends ItemView {
 
 		return SLASH_COMMANDS.filter((command) =>
 			command.label.toLowerCase().includes(normalizedQuery) ||
-			command.syntax.toLowerCase().includes(normalizedQuery)
+			command.syntax.toLowerCase().includes(normalizedQuery) ||
+			command.description.toLowerCase().includes(normalizedQuery)
 		);
 	}
 
@@ -1193,12 +1155,7 @@ export class PorygonView extends ItemView {
 			return;
 		}
 
-		if (command.id === "save") {
-			void this.saveSession();
-			return;
-		}
-
-		if (command.id === "sessions") {
+		if (command.id === "resume") {
 			void this.handleSessionsCommand();
 		}
 	}
@@ -1727,6 +1684,7 @@ export class PorygonView extends ItemView {
 			// Single-row update to switch from "streaming" to "historical"
 			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
 			this.chatList?.notifyChanged(porygonMessage);
+			await this.autosaveSession();
 		} catch (error) {
 			if (this.streamAbortController?.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
 				await this.handleStreamCancelled(porygonMessage, hasStartedStreamingContent, thinkingStartedAt);
@@ -1735,6 +1693,7 @@ export class PorygonView extends ItemView {
 				this.messages = this.messages.filter((message) => message !== porygonMessage);
 				this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 				this.renderMessages();
+				await this.autosaveSession();
 			}
 		} finally {
 			this.isStreaming = false;
@@ -1773,6 +1732,7 @@ export class PorygonView extends ItemView {
 		if (!hasPartialReply) {
 			this.messages = this.messages.filter((message) => message !== porygonMessage);
 			this.renderMessages();
+			await this.autosaveSession();
 			return;
 		}
 
@@ -1781,6 +1741,7 @@ export class PorygonView extends ItemView {
 			porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
 		}
 		this.chatList?.notifyChanged(porygonMessage);
+		await this.autosaveSession();
 	}
 
 	private getThinkingDurationSeconds(startedAt: number): number {
@@ -1873,26 +1834,35 @@ export class PorygonView extends ItemView {
 		return null;
 	}
 
-	private async saveSession(): Promise<void> {
+	// Serialize autosaves so a slow title generation on one turn can't let a
+	// later turn's save overtake it and write stale content (or run concurrently).
+	private autosaveSession(): Promise<void> {
+		this.autosaveQueue = this.autosaveQueue
+			.catch(() => undefined)
+			.then(() => this.runAutosave());
+		return this.autosaveQueue;
+	}
+
+	private async runAutosave(): Promise<void> {
 		const visibleMessages = this.messages.filter((message): message is ChatMessage & { role: "user" | "porygon" } => message.role === "user" || message.role === "porygon");
 		if (visibleMessages.length === 0) {
-			this.showFeedback("hint", "No session to save yet \u2014 start a conversation first.");
+			return;
+		}
+
+		// The id is pinned to the conversation when the user first sends a
+		// message, so autosave only reads it — it never mints a new one.
+		const sessionId = this.currentSessionId;
+		if (!sessionId) {
 			return;
 		}
 
 		try {
-			const sessionId = this.currentSessionId ?? crypto.randomUUID();
 			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
-			this.currentSessionId = sessionId;
 			this.currentSessionTitle = title;
 			const filename = `${PORYGON_SESSIONS_FOLDER}/${sessionId}.md`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
 			await this.ensureFolderExists(PORYGON_SESSIONS_FOLDER);
 			await this.writeSessionFile(filename, content);
-			this.showFeedback("info", `Saved session to \`${filename}\``, {
-				label: "Open",
-				action: () => void this.plugin.app.workspace.openLinkText(filename, "/", false),
-			});
 		} catch (error) {
 			this.showFeedback("error", `Couldn't save the session: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -1998,18 +1968,6 @@ export class PorygonView extends ItemView {
 
 	private async selectSession(session: SessionSummary): Promise<void> {
 		this.popoverHost.closeCurrent();
-		if (this.hasConversationContent()) {
-			const decision = await this.confirmSaveBeforeNewConversation();
-			if (decision === "cancel") {
-				this.composerInputEl?.focus();
-				return;
-			}
-
-			if (decision === "yes") {
-				await this.saveSession();
-			}
-		}
-
 		await this.loadSession(session.file);
 	}
 
@@ -2248,43 +2206,3 @@ export class PorygonView extends ItemView {
 	}
 }
 
-class SaveBeforeNewConversationModal extends Modal {
-	private plugin: PorygonPlugin;
-	private resolve: (decision: "yes" | "no" | "cancel") => void;
-	private didChoose = false;
-
-	constructor(plugin: PorygonPlugin, resolve: (decision: "yes" | "no" | "cancel") => void) {
-		super(plugin.app);
-		this.plugin = plugin;
-		this.resolve = resolve;
-	}
-
-	onOpen(): void {
-		this.setTitle("Start a new conversation?");
-		this.contentEl.empty();
-		this.contentEl.createEl("p", { text: "Do you want to save your conversation before starting a new one?" });
-		const actionsEl = this.contentEl.createDiv({ cls: "porygon-confirm-actions" });
-		this.createDecisionButton(actionsEl, "Yes", "yes", "mod-cta");
-		this.createDecisionButton(actionsEl, "No", "no");
-		this.createDecisionButton(actionsEl, "Cancel", "cancel");
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
-		if (!this.didChoose) {
-			this.resolve("cancel");
-		}
-	}
-
-	private createDecisionButton(containerEl: HTMLElement, label: string, decision: "yes" | "no" | "cancel", extraClass = ""): void {
-		const button = containerEl.createEl("button", {
-			cls: extraClass,
-			text: label,
-		});
-		button.addEventListener("click", () => {
-			this.didChoose = true;
-			this.resolve(decision);
-			this.close();
-		});
-	}
-}
