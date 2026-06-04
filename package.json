@@ -11,8 +11,9 @@
 		"preversion": "test -z \"$(git status --porcelain)\" || (echo 'Working tree must be clean before releasing.' && exit 1)",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"postversion": "git push origin HEAD && git push origin \"$npm_package_version\"",
-		"release:patch": "npm version patch -m \"%s\" --tag-version-prefix=\"\"",
-		"release:minor": "npm version minor -m \"%s\" --tag-version-prefix=\"\""
+		"release:check-branch": "test \"$(git rev-parse --abbrev-ref HEAD)\" = \"master\" || (echo 'Releases must be run from the master branch.' && exit 1)",
+		"release:patch": "npm run release:check-branch && npm version patch -m \"%s\" --tag-version-prefix=\"\"",
+		"release:minor": "npm run release:check-branch && npm version minor -m \"%s\" --tag-version-prefix=\"\""
 	},
 	"keywords": [],
 	"license": "0-BSD",
