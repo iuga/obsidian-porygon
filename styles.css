@@ -662,7 +662,6 @@
 }
 
 .porygon-slash-result-label,
-.porygon-slash-description,
 .porygon-session-result-preview {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
