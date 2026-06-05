@@ -708,6 +708,7 @@ export class PorygonView extends ItemView {
 		const installItem = list.createEl("li");
 		installItem.appendText("Install ollama: ");
 		installItem.createEl("a", {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- Literal URL must not be sentence-cased.
 			text: "https://ollama.com/download",
 			attr: { href: "https://ollama.com/download" },
 		});
@@ -1621,7 +1622,7 @@ export class PorygonView extends ItemView {
 					// of px, pushing the freshly-streaming answer above the
 					// viewport. Re-pin the user message to the top so the
 					// answer fills the now-empty space below it.
-					requestAnimationFrame(() => this.chatList?.pinMessageToTop(userMessage));
+					window.requestAnimationFrame(() => this.chatList?.pinMessageToTop(userMessage));
 				}
 			};
 			const clearPendingAnswerPlaceholder = () => {

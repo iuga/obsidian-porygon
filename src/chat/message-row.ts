@@ -69,7 +69,7 @@ export class MessageRow {
 	constructor(message: ChatMessage, deps: MessageRowDeps) {
 		this.message = message;
 		this.deps = deps;
-		this.el = document.createElement("div");
+		this.el = activeDocument.createElement("div");
 		this.el.addClass("porygon-message-row", `is-${message.role}`);
 		this.buildSkeleton();
 		this.update(message, /*forceFull*/ true);
@@ -491,7 +491,7 @@ export class MessageRow {
 		const snapshot = message.content;
 		const run = (async () => {
 			try {
-				const staging = document.createElement("div");
+				const staging = activeDocument.createElement("div");
 				await MarkdownRenderer.render(this.deps.app, snapshot, staging, "/", this.deps.component);
 				if (this.contentEl !== target) return;
 				target.empty();
@@ -533,7 +533,7 @@ export class MessageRow {
 		if (snapshot === this.renderedThinking) return Promise.resolve();
 		const run = (async () => {
 			try {
-				const staging = document.createElement("div");
+				const staging = activeDocument.createElement("div");
 				await MarkdownRenderer.render(this.deps.app, snapshot, staging, "/", this.deps.component);
 				if (this.thinkingContentEl !== target) return;
 				target.empty();
