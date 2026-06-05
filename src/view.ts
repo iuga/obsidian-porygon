@@ -707,9 +707,10 @@ export class PorygonView extends ItemView {
 		const list = contentEl.createEl("ol");
 		const installItem = list.createEl("li");
 		installItem.appendText("Install ollama: ");
+		const downloadUrl = "https://ollama.com/download";
 		installItem.createEl("a", {
-			text: "https://ollama.com/download",
-			attr: { href: "https://ollama.com/download" },
+			text: downloadUrl,
+			attr: { href: downloadUrl },
 		});
 		list.createEl("li", { text: "Make sure ollama is running, then try again." });
 	}
@@ -1621,7 +1622,7 @@ export class PorygonView extends ItemView {
 					// of px, pushing the freshly-streaming answer above the
 					// viewport. Re-pin the user message to the top so the
 					// answer fills the now-empty space below it.
-					requestAnimationFrame(() => this.chatList?.pinMessageToTop(userMessage));
+					window.requestAnimationFrame(() => this.chatList?.pinMessageToTop(userMessage));
 				}
 			};
 			const clearPendingAnswerPlaceholder = () => {

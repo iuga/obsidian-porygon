@@ -96,7 +96,7 @@ export class ChatList {
 		if (this.autoFollowEnableTimer !== null) {
 			window.clearTimeout(this.autoFollowEnableTimer);
 		}
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			if (!row.el.isConnected) return;
 			const anchorTop = row.el.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top + this.containerEl.scrollTop - 20;
 			this.programmaticScrollPending += 1;
