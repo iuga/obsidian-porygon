@@ -156,6 +156,50 @@
 	margin-bottom: 0;
 }
 
+.porygon-message-actions {
+	display: flex;
+	height: 28px;
+	align-items: center;
+	gap: var(--size-2-2);
+	opacity: 0;
+	transition: opacity 120ms ease-in-out;
+}
+
+.porygon-message-row.is-porygon:hover .porygon-message-actions,
+.porygon-message-actions:has(:focus-visible) {
+	opacity: 1;
+}
+
+.porygon-message-action.porygon-message-action {
+	display: flex;
+	width: 28px;
+	height: 28px;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.porygon-message-action.porygon-message-action:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.porygon-message-action.porygon-message-action:active {
+	background: var(--background-modifier-active-hover);
+	color: var(--text-normal);
+}
+
+.porygon-message-action svg {
+	width: 16px;
+	height: 16px;
+}
+
 .porygon-thinking-bubble {
 	width: 100%;
 	margin: 0;
