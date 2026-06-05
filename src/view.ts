@@ -707,10 +707,10 @@ export class PorygonView extends ItemView {
 		const list = contentEl.createEl("ol");
 		const installItem = list.createEl("li");
 		installItem.appendText("Install ollama: ");
+		const downloadUrl = "https://ollama.com/download";
 		installItem.createEl("a", {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case -- Literal URL must not be sentence-cased.
-			text: "https://ollama.com/download",
-			attr: { href: "https://ollama.com/download" },
+			text: downloadUrl,
+			attr: { href: downloadUrl },
 		});
 		list.createEl("li", { text: "Make sure ollama is running, then try again." });
 	}
