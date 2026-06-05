@@ -461,7 +461,7 @@ export class MessageRow {
 			{
 				icon: "copy",
 				label: "Copy response",
-				onClick: (buttonEl) => void copyToClipboard(buttonEl, this.message.content, "copy"),
+				onClick: () => void copyToClipboard(this.message.content),
 			},
 		]);
 	}

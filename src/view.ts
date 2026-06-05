@@ -113,7 +113,7 @@ const SETTING_STEPS: SettingStep[] = [
 
 const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "new", label: "New session", syntax: "/new", description: "Start a new session.", icon: "circle-plus" },
-	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume a saved conversation.", icon: "messages-square" },
+	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume/Load/Open a saved session.", icon: "messages-square" },
 ];
 
 const PORYGON_SESSIONS_FOLDER = "porygon/sessions";

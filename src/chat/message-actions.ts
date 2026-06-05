@@ -28,19 +28,13 @@ export function renderMessageActions(containerEl: HTMLElement, actions: MessageA
 }
 
 /**
- * Copies text to the clipboard and gives transient "Copied" feedback by
- * swapping the button icon to a checkmark, then restoring it.
+ * Copies text to the clipboard. Best-effort: clipboard access can be
+ * denied, and a failed copy is silently ignored.
  */
-export async function copyToClipboard(buttonEl: HTMLButtonElement, text: string, restoreIcon: string): Promise<void> {
+export async function copyToClipboard(text: string): Promise<void> {
 	try {
 		await navigator.clipboard.writeText(text);
-		setIcon(buttonEl, "check");
-		setTooltip(buttonEl, "Copied", { placement: "top" });
-		window.setTimeout(() => {
-			setIcon(buttonEl, restoreIcon);
-			setTooltip(buttonEl, "Copy response", { placement: "top" });
-		}, 1500);
 	} catch {
-		setTooltip(buttonEl, "Copy failed", { placement: "top" });
+		// Clipboard write can fail (permissions, no focus); nothing to recover.
 	}
 }

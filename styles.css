@@ -166,7 +166,7 @@
 }
 
 .porygon-message-row.is-porygon:hover .porygon-message-actions,
-.porygon-message-actions:focus-within {
+.porygon-message-actions:has(:focus-visible) {
 	opacity: 1;
 }
 
@@ -187,6 +187,11 @@
 
 .porygon-message-action.porygon-message-action:hover {
 	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.porygon-message-action.porygon-message-action:active {
+	background: var(--background-modifier-active-hover);
 	color: var(--text-normal);
 }
 
