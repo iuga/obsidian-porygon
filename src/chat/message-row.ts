@@ -1,4 +1,5 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
+import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
 
 interface MessageRowDeps {
@@ -47,6 +48,7 @@ export class MessageRow {
 	private toolsListEl: HTMLElement | null = null;
 	private contentBubbleEl: HTMLElement | null = null;
 	private contentEl: HTMLElement | null = null;
+	private actionsEl: HTMLElement | null = null;
 	private messageStackEl: HTMLElement | null = null;
 
 	// rAF coalescing state. Lives per-row so concurrent streams (future)
@@ -104,6 +106,7 @@ export class MessageRow {
 		this.reconcileThinking(message, showThinking, forceFull);
 		this.reconcileTools(message, showTools, forceFull);
 		this.reconcileContent(message, showContent, forceFull);
+		this.reconcileActions(message, showContent);
 
 		this.renderedShowThinking = showThinking;
 		this.renderedShowTools = showTools;
@@ -429,6 +432,38 @@ export class MessageRow {
 		this.contentBubbleEl = bubble;
 		this.contentEl = contentEl;
 		this.renderedContent = null;
+	}
+
+	/**
+	 * Hover-revealed actions bar shown below a finished agent answer.
+	 * Built once, after the content bubble, only on historical porygon
+	 * rows: streaming rows have no bar (no copying a half-streamed reply)
+	 * and removing it keeps non-answer rows clean. Visibility is pure CSS
+	 * hover, so this never shifts layout or disturbs auto-scroll.
+	 */
+	private reconcileActions(message: ChatMessage, showContent: boolean): void {
+		if (!this.messageStackEl) return;
+		const showActions = message.role === "porygon" && showContent && !message.isStreaming;
+		if (!showActions) {
+			if (this.actionsEl) {
+				this.actionsEl.remove();
+				this.actionsEl = null;
+			}
+			return;
+		}
+		if (this.actionsEl) return;
+		this.buildActions();
+	}
+
+	private buildActions(): void {
+		if (!this.messageStackEl) return;
+		this.actionsEl = renderMessageActions(this.messageStackEl, [
+			{
+				icon: "copy",
+				label: "Copy response",
+				onClick: (buttonEl) => void copyToClipboard(buttonEl, this.message.content, "copy"),
+			},
+		]);
 	}
 
 	// --- Streaming render scheduling --------------------------------------
