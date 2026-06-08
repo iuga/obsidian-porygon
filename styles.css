@@ -159,6 +159,11 @@
 	margin-bottom: 0;
 }
 
+.porygon-message-row.is-user .porygon-message-content :is(pre, code) {
+	background: rgba(0, 0, 0, 0.18);
+	color: var(--text-on-accent);
+}
+
 .porygon-message-actions {
 	display: flex;
 	height: 28px;
