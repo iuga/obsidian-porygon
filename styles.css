@@ -144,8 +144,11 @@
 }
 
 .porygon-message-content.markdown-rendered {
-	width: 100%;
 	white-space: normal;
+}
+
+.porygon-message-row.is-porygon .porygon-message-content.markdown-rendered {
+	width: 100%;
 }
 
 .porygon-message-content.markdown-rendered > :first-child {
