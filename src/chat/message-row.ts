@@ -412,11 +412,11 @@ export class MessageRow {
 			return;
 		}
 
-		// User message: plain text.
+		// User message: render markdown (never streamed).
 		if (forceFull || message.content !== this.renderedContent) {
 			this.contentEl.empty();
-			this.contentEl.setText(message.content);
 			this.renderedContent = message.content;
+			void MarkdownRenderer.render(this.deps.app, message.content, this.contentEl, "/", this.deps.component);
 		}
 	}
 
@@ -426,7 +426,7 @@ export class MessageRow {
 		const iconEl = bubble.createDiv({ cls: "porygon-message-icon" });
 		setIcon(iconEl, message.role === "user" ? "user" : "origami");
 		const contentEl = bubble.createDiv({ cls: "porygon-message-content" });
-		if (message.role === "porygon") {
+		if (message.role === "porygon" || message.role === "user") {
 			contentEl.addClass("markdown-rendered");
 		}
 		this.contentBubbleEl = bubble;

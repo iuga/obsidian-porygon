@@ -144,8 +144,11 @@
 }
 
 .porygon-message-content.markdown-rendered {
-	width: 100%;
 	white-space: normal;
+}
+
+.porygon-message-row.is-porygon .porygon-message-content.markdown-rendered {
+	width: 100%;
 }
 
 .porygon-message-content.markdown-rendered > :first-child {
@@ -154,6 +157,11 @@
 
 .porygon-message-content.markdown-rendered > :last-child {
 	margin-bottom: 0;
+}
+
+.porygon-message-row.is-user .porygon-message-content :is(pre, code) {
+	background: rgba(0, 0, 0, 0.18);
+	color: var(--text-on-accent);
 }
 
 .porygon-message-actions {
