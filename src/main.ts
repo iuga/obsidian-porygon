@@ -25,7 +25,7 @@ export default class PorygonPlugin extends Plugin {
 
 		await this.loadSettings();
 		this.skills = new SkillsService(this.app);
-		this.ragStore = new RagIndexedDbStore();
+		this.ragStore = new RagIndexedDbStore(this.app);
 		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
 		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore);
 
