@@ -13,6 +13,10 @@ const MODIFY_DEBOUNCE_MS = 1500;
 const SETTINGS_RECONCILE_DEBOUNCE_MS = 1000;
 const MAX_CHUNKS_PER_FILE = 256;
 const EMBEDDING_BATCH_SIZE = 16;
+// Porygon's own managed notes (sessions, skills) live under this folder. They
+// are internal plumbing, so they are always excluded from the index regardless
+// of the user-configurable ignore list.
+const INTERNAL_ROOT = "porygon";
 
 type IgnoreMatcher = (path: string) => boolean;
 type PrefetchedFile = { content: string; contentHash: string };
@@ -360,7 +364,7 @@ export class RagIndexer {
 	}
 
 	private isIgnored(path: string): boolean {
-		return this.ignoreMatcher(path);
+		return isInternalPath(path) || this.ignoreMatcher(path);
 	}
 
 	private getEmbeddingConfig(): string {
@@ -437,6 +441,11 @@ async function hashText(text: string): Promise<string> {
 
 function normalizeIndexPath(path: string): string {
 	return path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+}
+
+function isInternalPath(path: string): boolean {
+	const normalized = normalizeIndexPath(path);
+	return normalized === INTERNAL_ROOT || normalized.startsWith(`${INTERNAL_ROOT}/`);
 }
 
 function sleep(ms: number): Promise<void> {
