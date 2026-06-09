@@ -4,6 +4,12 @@ import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInp
 
 const RAG_DATABASE_PREFIX = "porygon";
 const LEGACY_RAG_DATABASE_NAME = "porygon-rag";
+// Semantic schema version baked into the database name. Bump this on a breaking
+// change to the stored shape: every vault starts fresh on the new database and
+// the previous versions are deleted by deleteStaleDatabases. Distinct from
+// RAG_DATABASE_VERSION below, which is idb's internal object-store version used
+// for additive, non-breaking migrations within a single database.
+const RAG_SCHEMA_VERSION = 1;
 const RAG_DATABASE_VERSION = 1;
 const FILES_STORE = "files";
 const CHUNKS_STORE = "chunks";
@@ -46,18 +52,26 @@ export class RagIndexedDbStore {
 
 	constructor(app: App) {
 		this.databaseName = buildRagDatabaseName(app);
-		void this.deleteLegacyDatabase();
+		void this.deleteStaleDatabases(app);
 	}
 
-	// One-time cleanup of the legacy shared database so already-leaked content
-	// does not linger on disk. The `~` separator guarantees databaseName can never
-	// equal the legacy name, so this is always safe to run unconditionally.
-	private async deleteLegacyDatabase(): Promise<void> {
-		try {
-			await deleteDB(LEGACY_RAG_DATABASE_NAME);
-		} catch (error) {
-			console.warn("[Porygon RAG] failed to delete legacy database", error);
+	// One-time cleanup of databases superseded by the current schema version so
+	// already-leaked or outdated content does not linger on disk: the legacy shared
+	// database plus every prior per-vault schema version. Runs fire-and-forget;
+	// deleting a non-existent database is a no-op.
+	private async deleteStaleDatabases(app: App): Promise<void> {
+		const staleNames = [LEGACY_RAG_DATABASE_NAME];
+		for (let version = 1; version < RAG_SCHEMA_VERSION; version++) {
+			staleNames.push(buildRagDatabaseName(app, version));
 		}
+
+		await Promise.all(staleNames.map(async (name) => {
+			try {
+				await deleteDB(name);
+			} catch (error) {
+				console.warn(`[Porygon RAG] failed to delete stale database ${name}`, error);
+			}
+		}));
 	}
 
 	async close(): Promise<void> {
@@ -226,9 +240,10 @@ export function arrayBufferToFloat32Array(vector: ArrayBuffer): Float32Array {
 // id at runtime (absent from the public typings); `vault.getName()` is the
 // fallback when it is unavailable. We join with `~` (which the legacy name never
 // contains) so the result can never collide with `porygon-rag`, even for a vault
-// literally named "rag".
-function buildRagDatabaseName(app: App): string {
+// literally named "rag". The schema version segment lets a future breaking change
+// move every vault to a fresh database.
+function buildRagDatabaseName(app: App, version = RAG_SCHEMA_VERSION): string {
 	const appId = (app as App & { appId?: string }).appId;
 	const vault = (appId || app.vault.getName()).toLowerCase().replace(/[^a-z0-9]/g, "");
-	return `${RAG_DATABASE_PREFIX}~${vault}`;
+	return `${RAG_DATABASE_PREFIX}~v${version}~${vault}`;
 }
