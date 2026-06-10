@@ -88,3 +88,36 @@ export interface RagSemanticSearchResult {
 	text: string;
 	score: number;
 }
+
+export interface RagRetrievalMatch {
+	chunkId: string;
+	score: number;
+}
+
+// Port for the persistence layer of the semantic index. Implementations
+// (adapters) live in `store/` and are resolved through `createRagStore`, so
+// the indexer and search service never depend on a concrete database.
+export interface RagStore {
+	getFile(path: string): Promise<RagFileRecord | undefined>;
+	getAllFiles(): Promise<RagFileRecord[]>;
+	countFiles(): Promise<number>;
+	replaceFile(input: RagIndexedFileInput): Promise<void>;
+	deleteFile(path: string): Promise<void>;
+	deleteFiles(paths: string[]): Promise<void>;
+	clearIndex(): Promise<void>;
+	getChunks(ids: string[]): Promise<RagChunkRecord[]>;
+	getVectorsForEmbeddingModel(embeddingModel: string): Promise<RagVectorRecord[]>;
+	close(): Promise<void>;
+	// Optional capability for stores with native vector search (e.g. a future
+	// SQLite + sqlite-vec backend). When present, a store-native retriever can
+	// push KNN down to the database instead of brute-forcing in JS. Scores
+	// must be similarity-ordered: higher is more similar.
+	searchVectors?(queryVector: Float32Array, embeddingModel: string, limit: number): Promise<RagRetrievalMatch[]>;
+}
+
+// Port for the retrieval/ranking strategy used by semantic search.
+// Implementations live in `retrieval/` and are resolved through
+// `createRagRetriever`. Scores are similarity-ordered: higher is more similar.
+export interface RagRetriever {
+	retrieve(queryVector: Float32Array, embeddingModel: string, limit: number): Promise<RagRetrievalMatch[]>;
+}

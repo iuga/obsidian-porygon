@@ -4,8 +4,8 @@ import picomatch from "picomatch";
 import { getActiveProvider, getEmbeddings } from "../providers";
 import { PorygonPluginSettings } from "../settings/settings";
 import { buildMarkdownChunks } from "./chunks";
-import { float32ArrayToArrayBuffer, RagIndexedDbStore } from "./indexeddb-store";
-import { RagChunkRecord, RagFileRecord, RagIndexProgress, RagVectorRecord } from "./types";
+import { float32ArrayToArrayBuffer } from "./store/vector-codec";
+import { RagChunkRecord, RagFileRecord, RagIndexProgress, RagStore, RagVectorRecord } from "./types";
 
 const INDEX_BATCH_SIZE = 2;
 const INDEX_YIELD_MS = 25;
@@ -24,7 +24,7 @@ type PrefetchedFile = { content: string; contentHash: string };
 export class RagIndexer {
 	private app: App;
 	private settings: PorygonPluginSettings;
-	private store: RagIndexedDbStore;
+	private store: RagStore;
 	private queue: TFile[] = [];
 	private queuedPaths = new Set<string>();
 	private prefetchedFiles = new Map<string, PrefetchedFile>();
@@ -44,7 +44,7 @@ export class RagIndexer {
 	private modifyDebounceTimeouts = new Map<string, number>();
 	private settingsReconcileTimeout: number | null = null;
 
-	constructor(app: App, settings: PorygonPluginSettings, store: RagIndexedDbStore) {
+	constructor(app: App, settings: PorygonPluginSettings, store: RagStore) {
 		this.app = app;
 		this.settings = settings;
 		this.store = store;

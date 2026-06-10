@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
-import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
+import { createRagRetriever, createRagStore, RagIndexer, RagSemanticSearchService, RagStore } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
 import { PorygonSettingTab } from "./settings/settings-tab";
 import { sanitizeMemories } from "./agent/memories";
@@ -14,7 +14,9 @@ export default class PorygonPlugin extends Plugin {
 	ragIndexer: RagIndexer;
 	ragSemanticSearch: RagSemanticSearchService;
 	skills: SkillsService;
-	private ragStore: RagIndexedDbStore;
+	private ragStore: RagStore;
+	private activeRagStoreBackend: string;
+	private activeRagRetrievalStrategy: string;
 
 	async onload(): Promise<void> {
 		// LangGraph's `interrupt()` resumes the right async context only when
@@ -25,9 +27,7 @@ export default class PorygonPlugin extends Plugin {
 
 		await this.loadSettings();
 		this.skills = new SkillsService(this.app);
-		this.ragStore = new RagIndexedDbStore(this.app);
-		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
-		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore);
+		this.buildRagPipeline();
 
 		this.registerView(
 			PORYGON_VIEW_TYPE,
@@ -87,11 +87,42 @@ export default class PorygonPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		this.settings.memories = sanitizeMemories(this.settings.memories);
 		await this.saveData(this.settings);
-		this.ragIndexer.updateSettings(this.settings);
-		this.ragSemanticSearch.updateSettings(this.settings);
+		const ragPipelineChanged = this.activeRagStoreBackend !== this.settings.ragStoreBackend
+			|| this.activeRagRetrievalStrategy !== this.settings.ragRetrievalStrategy;
+		if (ragPipelineChanged) {
+			await this.rebuildRagPipeline();
+		} else {
+			this.ragIndexer.updateSettings(this.settings);
+			this.ragSemanticSearch.updateSettings(this.settings);
+		}
 		// Settings may have changed host/model/thinking effort; drop the cached agent
 		// so the next send rebuilds it with the new config.
 		resetAgent();
+	}
+
+	// Resolves the store backend and retrieval strategy from settings via the
+	// rag registries, so swapping implementations never touches this wiring.
+	private buildRagPipeline(): void {
+		this.ragStore = createRagStore(this.app, this.settings);
+		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
+		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore, createRagRetriever(this.settings, this.ragStore));
+		this.activeRagStoreBackend = this.settings.ragStoreBackend;
+		this.activeRagRetrievalStrategy = this.settings.ragRetrievalStrategy;
+	}
+
+	// Tears down the active pipeline and rebuilds it from settings (used when
+	// the store backend or retrieval strategy changes at runtime). Vault event
+	// handlers call through `this.ragIndexer`, so no re-registration is needed.
+	private async rebuildRagPipeline(): Promise<void> {
+		this.ragIndexer.dispose();
+		const previousStore = this.ragStore;
+		this.buildRagPipeline();
+		try {
+			await previousStore.close();
+		} catch (error) {
+			console.warn("[Porygon RAG] failed to close previous store", error);
+		}
+		void this.ragIndexer.reconcile();
 	}
 
 	private registerSkillEvents(): void {

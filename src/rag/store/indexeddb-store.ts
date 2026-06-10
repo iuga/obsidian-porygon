@@ -1,6 +1,6 @@
 import { deleteDB, DBSchema, IDBPDatabase, IDBPTransaction, openDB } from "idb";
 import type { App } from "obsidian";
-import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagVectorRecord } from "./types";
+import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagStore, RagVectorRecord } from "../types";
 
 const RAG_DATABASE_PREFIX = "porygon";
 const LEGACY_RAG_DATABASE_NAME = "porygon-rag";
@@ -46,7 +46,7 @@ interface PorygonRagDatabase extends DBSchema {
 
 type RagStoreNames = ["files", "chunks", "vectors"];
 
-export class RagIndexedDbStore {
+export class RagIndexedDbStore implements RagStore {
 	private dbPromise: Promise<IDBPDatabase<PorygonRagDatabase>> | null = null;
 	private readonly databaseName: string;
 
@@ -224,14 +224,6 @@ export class RagIndexedDbStore {
 			...vectorKeys.map((key) => vectorsStore.delete(key)),
 		]);
 	}
-}
-
-export function float32ArrayToArrayBuffer(vector: Float32Array): ArrayBuffer {
-	return vector.buffer.slice(vector.byteOffset, vector.byteOffset + vector.byteLength);
-}
-
-export function arrayBufferToFloat32Array(vector: ArrayBuffer): Float32Array {
-	return new Float32Array(vector);
 }
 
 // IndexedDB is scoped by origin, and every vault in the same Obsidian install

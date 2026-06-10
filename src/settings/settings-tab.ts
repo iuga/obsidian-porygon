@@ -1,7 +1,7 @@
 import { debounce, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "../main";
 import { getActiveProvider } from "../providers";
-import { RagIndexProgress } from "../rag";
+import { getRagRetrievalDefinitions, getRagStoreDefinitions, RagIndexProgress, RagRetrievalStrategyId, RagStoreBackendId } from "../rag";
 import { ONBOARDING_DEFAULTS } from "./settings";
 import type { ThinkingEffort } from "./settings";
 
@@ -156,6 +156,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.statusSetting = new Setting(semanticItems).setName("Index status");
 		this.subscribeToIndexProgress();
 
+		this.renderRagBackendDropdowns(semanticItems);
+
 		const ignoredPathsSetting = new Setting(semanticItems)
 			.setName("Ignored semantic index paths")
 			.setDesc("Vault-relative files or folders to exclude from the semantic index. Use one path or glob-like pattern per line.")
@@ -171,6 +173,43 @@ export class PorygonSettingTab extends PluginSettingTab {
 				textArea.inputEl.addClass("porygon-settings-ignored-paths");
 			});
 		ignoredPathsSetting.settingEl.addClass("porygon-settings-textarea-setting");
+	}
+
+	// Store backend and retrieval strategy come from the rag registries. Each
+	// dropdown lists whatever is registered; new implementations appear here
+	// automatically once added to the registry.
+	private renderRagBackendDropdowns(containerEl: HTMLElement): void {
+		const storeDefinitions = getRagStoreDefinitions();
+		new Setting(containerEl)
+			.setName("Index storage backend")
+			.setDesc("Where the semantic index is stored. Changing this rebuilds the index.")
+			.addDropdown((dd) => {
+				for (const definition of storeDefinitions) {
+					dd.addOption(definition.id, definition.name);
+				}
+				dd.setValue(this.plugin.settings.ragStoreBackend);
+				dd.selectEl.disabled = storeDefinitions.length < 2;
+				dd.onChange((value) => {
+					this.plugin.settings.ragStoreBackend = value as RagStoreBackendId;
+					this.persist();
+				});
+			});
+
+		const retrievalDefinitions = getRagRetrievalDefinitions();
+		new Setting(containerEl)
+			.setName("Retrieval strategy")
+			.setDesc("How semantic search ranks indexed chunks.")
+			.addDropdown((dd) => {
+				for (const definition of retrievalDefinitions) {
+					dd.addOption(definition.id, definition.name);
+				}
+				dd.setValue(this.plugin.settings.ragRetrievalStrategy);
+				dd.selectEl.disabled = retrievalDefinitions.length < 2;
+				dd.onChange((value) => {
+					this.plugin.settings.ragRetrievalStrategy = value as RagRetrievalStrategyId;
+					this.persist();
+				});
+			});
 	}
 
 	private renderModelDropdown(containerEl: HTMLElement, key: ModelSettingKey, name: string, desc: string, capability: string): void {

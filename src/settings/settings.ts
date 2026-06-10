@@ -1,5 +1,7 @@
 import defaultPersonalPrompt from "../../prompts/personal.md";
 import { DEFAULT_MEMORIES } from "../agent/memories";
+import { DEFAULT_RAG_RETRIEVAL_STRATEGY, type RagRetrievalStrategyId } from "../rag/retrieval";
+import { DEFAULT_RAG_STORE_BACKEND, type RagStoreBackendId } from "../rag/store";
 
 export type ExperiencePreset = "" | "minimal" | "balanced" | "verbose" | "yolo";
 
@@ -15,6 +17,8 @@ export interface PorygonPluginSettings {
 	yolo: boolean;
 	experience: ExperiencePreset;
 	ragIgnoredPaths: string;
+	ragStoreBackend: RagStoreBackendId;
+	ragRetrievalStrategy: RagRetrievalStrategyId;
 	personalPrompt: string;
 	memories: string;
 }
@@ -31,6 +35,8 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	yolo: false,
 	experience: "",
 	ragIgnoredPaths: "",
+	ragStoreBackend: DEFAULT_RAG_STORE_BACKEND,
+	ragRetrievalStrategy: DEFAULT_RAG_RETRIEVAL_STRATEGY,
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 	memories: DEFAULT_MEMORIES,
 };
@@ -45,6 +51,8 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	yolo: false,
 	experience: "verbose",
 	ragIgnoredPaths: "",
+	ragStoreBackend: DEFAULT_RAG_STORE_BACKEND,
+	ragRetrievalStrategy: DEFAULT_RAG_RETRIEVAL_STRATEGY,
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 	memories: DEFAULT_MEMORIES,
 };

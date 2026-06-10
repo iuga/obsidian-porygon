@@ -1,18 +1,23 @@
 import type { Embeddings } from "@langchain/core/embeddings";
 import { getActiveProvider, getEmbeddings } from "../providers";
 import { PorygonPluginSettings } from "../settings/settings";
-import { arrayBufferToFloat32Array, RagIndexedDbStore } from "./indexeddb-store";
-import { RagSemanticSearchOptions, RagSemanticSearchResult } from "./types";
+import { RagRetriever, RagSemanticSearchOptions, RagSemanticSearchResult, RagStore } from "./types";
 
 export const DEFAULT_SEMANTIC_SEARCH_LIMIT = 8;
 
+// Orchestrates semantic search against the RagStore/RagRetriever ports:
+// embed the query, delegate ranking to the retriever, hydrate chunks from
+// the store. Storage backend and retrieval strategy are swappable without
+// touching this class.
 export class RagSemanticSearchService {
 	private settings: PorygonPluginSettings;
-	private store: RagIndexedDbStore;
+	private store: RagStore;
+	private retriever: RagRetriever;
 
-	constructor(settings: PorygonPluginSettings, store: RagIndexedDbStore) {
+	constructor(settings: PorygonPluginSettings, store: RagStore, retriever: RagRetriever) {
 		this.settings = settings;
 		this.store = store;
+		this.retriever = retriever;
 	}
 
 	updateSettings(settings: PorygonPluginSettings): void {
@@ -36,31 +41,22 @@ export class RagSemanticSearchService {
 			embeddingModel: this.settings.ollamaEmbeddingModel,
 		});
 
-		const vectors = await this.store.getVectorsForEmbeddingModel(this.settings.ollamaEmbeddingModel);
-		if (vectors.length === 0) {
+		const embeddings = this.getEmbeddingsClient();
+		const queryVector = new Float32Array(await embeddings.embedQuery(query));
+		const matches = await this.retriever.retrieve(queryVector, this.settings.ollamaEmbeddingModel, limit);
+		if (matches.length === 0) {
 			console.debug("[Porygon RAG] semantic search results", {
 				query,
-				vectorCount: 0,
+				matchCount: 0,
 				results: [],
 			});
 			return [];
 		}
 
-		const embeddings = this.getEmbeddingsClient();
-		const queryVector = new Float32Array(await embeddings.embedQuery(query));
-		const scored = vectors
-			.map((vector) => ({
-				chunkId: vector.chunkId,
-				score: cosineSimilarity(queryVector, arrayBufferToFloat32Array(vector.vector)),
-			}))
-			.filter((result) => Number.isFinite(result.score))
-			.sort((left, right) => right.score - left.score)
-			.slice(0, limit);
-
-		const chunks = await this.store.getChunks(scored.map((result) => result.chunkId));
+		const chunks = await this.store.getChunks(matches.map((match) => match.chunkId));
 		const chunksById = new Map(chunks.map((chunk) => [chunk.id, chunk]));
-		const results = scored.flatMap((result) => {
-			const chunk = chunksById.get(result.chunkId);
+		const results = matches.flatMap((match) => {
+			const chunk = chunksById.get(match.chunkId);
 			if (!chunk) {
 				return [];
 			}
@@ -71,12 +67,12 @@ export class RagSemanticSearchService {
 				title: chunk.title,
 				chunkIndex: chunk.chunkIndex,
 				text: chunk.text,
-				score: result.score,
+				score: match.score,
 			}];
 		});
 		console.debug("[Porygon RAG] semantic search results", {
 			query,
-			vectorCount: vectors.length,
+			matchCount: matches.length,
 			results: results.map((result) => ({
 				path: result.path,
 				chunkIndex: result.chunkIndex,
@@ -90,27 +86,4 @@ export class RagSemanticSearchService {
 	private getEmbeddingsClient(): Embeddings {
 		return getEmbeddings(this.settings);
 	}
-}
-
-export function cosineSimilarity(left: Float32Array, right: Float32Array): number {
-	if (left.length === 0 || left.length !== right.length) {
-		return Number.NEGATIVE_INFINITY;
-	}
-
-	let dotProduct = 0;
-	let leftMagnitude = 0;
-	let rightMagnitude = 0;
-	for (let index = 0; index < left.length; index++) {
-		const leftValue = left[index] ?? 0;
-		const rightValue = right[index] ?? 0;
-		dotProduct += leftValue * rightValue;
-		leftMagnitude += leftValue * leftValue;
-		rightMagnitude += rightValue * rightValue;
-	}
-
-	if (leftMagnitude === 0 || rightMagnitude === 0) {
-		return Number.NEGATIVE_INFINITY;
-	}
-
-	return dotProduct / Math.sqrt(leftMagnitude * rightMagnitude);
 }
