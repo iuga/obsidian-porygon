@@ -6,6 +6,7 @@ import { ChatList } from "./chat/chat-list";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 import { getActiveProvider } from "./providers";
 import { PopoverHost } from "./ui/popover";
+import { ensureFolderExists } from "./utils/vault";
 
 export const PORYGON_VIEW_TYPE = "porygon-view";
 
@@ -1867,7 +1868,7 @@ export class PorygonView extends ItemView {
 			const sessionsFolder = this.getSessionsFolder();
 			const filename = `${sessionsFolder}/${sessionId}.md`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
-			await this.ensureFolderExists(sessionsFolder);
+			await ensureFolderExists(this.plugin.app, sessionsFolder);
 			await this.writeSessionFile(filename, content);
 		} catch (error) {
 			this.showFeedback("error", `Couldn't save the session: ${error instanceof Error ? error.message : String(error)}`);
@@ -2110,28 +2111,6 @@ export class PorygonView extends ItemView {
 
 		flushCurrentMessage();
 		return messages;
-	}
-
-	private async ensureFolderExists(path: string): Promise<void> {
-		const segments = normalizePath(path).split("/");
-		let current = "";
-		for (const segment of segments) {
-			current = current ? `${current}/${segment}` : segment;
-			if (this.plugin.app.vault.getAbstractFileByPath(current) instanceof TFolder) {
-				continue;
-			}
-
-			try {
-				await this.plugin.app.vault.createFolder(current);
-			} catch (error) {
-				// Race or pre-existing folder: treat as no-op.
-				if (this.plugin.app.vault.getAbstractFileByPath(current) instanceof TFolder) {
-					continue;
-				}
-
-				throw error;
-			}
-		}
 	}
 
 	private toMentionedItem(result: MentionSearchResult): MentionedItem {

@@ -1,6 +1,7 @@
 import { App, normalizePath, TFile, TFolder } from "obsidian";
 import defaultPersonalPrompt from "../../prompts/personal.md";
 import { DEFAULT_MEMORIES } from "../agent/memories";
+import { ensureFolderExists } from "../utils/vault";
 
 export type ExperiencePreset = "" | "minimal" | "balanced" | "verbose" | "yolo";
 
@@ -181,7 +182,10 @@ export async function movePorygonFolder(host: PorygonFolderHost, rawNewPath: str
 		await host.app.fileManager.trashFile(destination);
 	}
 
-	await ensureParentFolders(host.app, newPath);
+	const parentPath = newPath.split("/").slice(0, -1).join("/");
+	if (parentPath) {
+		await ensureFolderExists(host.app, parentPath);
+	}
 
 	host.settings.porygonFolder = newPath;
 	try {
@@ -196,27 +200,4 @@ export async function movePorygonFolder(host: PorygonFolderHost, rawNewPath: str
 	await host.saveSettings();
 	await host.skills.refresh();
 	return "moved";
-}
-
-async function ensureParentFolders(app: App, folderPath: string): Promise<void> {
-	const parentPath = folderPath.split("/").slice(0, -1).join("/");
-	if (!parentPath) {
-		return;
-	}
-
-	const segments = parentPath.split("/");
-	let current = "";
-	for (const segment of segments) {
-		current = current ? `${current}/${segment}` : segment;
-		const existing = app.vault.getAbstractFileByPath(current);
-		if (existing instanceof TFolder) {
-			continue;
-		}
-
-		if (existing) {
-			throw new Error(`A note already exists at "${current}".`);
-		}
-
-		await app.vault.createFolder(current);
-	}
 }
