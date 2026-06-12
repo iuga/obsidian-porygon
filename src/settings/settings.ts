@@ -154,6 +154,10 @@ export async function movePorygonFolder(host: PorygonFolderHost, rawNewPath: str
 		throw new Error("The new folder can't be inside the current Porygon folder.");
 	}
 
+	if (oldPath.startsWith(`${newPath}/`)) {
+		throw new Error("The new folder can't be a parent of the current Porygon folder.");
+	}
+
 	const destination = host.app.vault.getAbstractFileByPath(newPath);
 	if (destination instanceof TFile) {
 		throw new Error(`A note already exists at "${newPath}".`);
