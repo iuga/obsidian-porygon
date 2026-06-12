@@ -173,10 +173,12 @@ export async function movePorygonFolder(host: PorygonFolderHost, rawNewPath: str
 		return "adopted";
 	}
 
-	// renameFile refuses to overwrite; an empty leftover folder is safe to drop.
+	// renameFile refuses to overwrite, so clear the empty destination first.
+	// trashFile (not vault.delete): respects the user's deletion preference,
+	// and still works when the vault-empty folder holds hidden files (e.g.
+	// .DS_Store) that vault.delete would refuse to remove.
 	if (destination instanceof TFolder) {
-		// eslint-disable-next-line obsidianmd/prefer-file-manager-trash-file -- the folder is verified empty; deleting it outright avoids cluttering the trash with empty folders.
-		await host.app.vault.delete(destination);
+		await host.app.fileManager.trashFile(destination);
 	}
 
 	await ensureParentFolders(host.app, newPath);
