@@ -45,7 +45,8 @@ Keep the interface simple and concise, or enable advanced features like model th
 Porygon requires Ollama to be installed and running locally. You can download it from [Ollama](https://ollama.com?utm_source=chatgpt.com) and install a model with:
 
 ```bash
-ollama run gemma4
+ollama pull gemma4:12b # chat model 
+ollama pull qwen3-embedding:8b # embeddings model (search)
 ```
 
 The first time you open Porygon, the onboarding flow will guide you through configuring your Ollama host, chat model, and embeddings model.
