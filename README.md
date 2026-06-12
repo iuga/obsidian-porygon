@@ -34,7 +34,7 @@ Porygon can save short, concrete observations about you and your work as long-te
 
 ### Skills
 
-Skills are reusable instructions that teach Porygon how to handle specific tasks, such as summarizing notes in a consistent format. Porygon stores them as Markdown files in `porygon/skills/` and automatically makes them available to the assistant. To add a new skill, create a `.md` file in that folder with a short YAML header containing `name` and `description`, then write the instructions below it.
+Skills are reusable instructions that teach Porygon how to handle specific tasks, such as summarizing notes in a consistent format. Porygon stores them as Markdown files in the `skills/` subfolder of its internal folder (`porygon/skills/` by default, configurable under **Settings → Porygon → Advanced**) and automatically makes them available to the assistant. To add a new skill, create a `.md` file in that folder with a short YAML header containing `name` and `description`, then write the instructions below it.
 
 ### Personalize your experience
 

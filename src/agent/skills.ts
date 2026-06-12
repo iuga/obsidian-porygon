@@ -18,7 +18,7 @@ interface ParsedSkillMarkdown {
 	content: string;
 }
 
-const SKILLS_FOLDER = "porygon/skills";
+const SKILLS_SUBFOLDER = "skills";
 const REFRESH_DEBOUNCE_MS = 400;
 const BUNDLED_SKILLS: BundledSkill[] = [
 	{ filename: "summarizer.md", content: summarizerSkill },
@@ -30,12 +30,15 @@ export class SkillsService {
 	private initialized = false;
 	private debouncedRefresh: Debouncer<[], void>;
 
-	constructor(private readonly app: App) {
+	constructor(
+		private readonly app: App,
+		private readonly getPorygonFolder: () => string,
+	) {
 		this.debouncedRefresh = debounce(() => { void this.refresh(); }, REFRESH_DEBOUNCE_MS, true);
 	}
 
 	async initialize(): Promise<void> {
-		await ensureBundledSkills(this.app);
+		await ensureBundledSkills(this.app, this.getSkillsFolder());
 		await this.refresh();
 		this.initialized = true;
 	}
@@ -44,12 +47,17 @@ export class SkillsService {
 		return this.skills;
 	}
 
+	getSkillsFolder(): string {
+		return normalizePath(`${this.getPorygonFolder()}/${SKILLS_SUBFOLDER}`);
+	}
+
 	isManagedPath(path: string): boolean {
-		return path === SKILLS_FOLDER || path.startsWith(`${SKILLS_FOLDER}/`);
+		const skillsFolder = this.getSkillsFolder();
+		return path === skillsFolder || path.startsWith(`${skillsFolder}/`);
 	}
 
 	async refresh(): Promise<void> {
-		this.skills = await discoverSkills(this.app);
+		this.skills = await discoverSkills(this.app, this.getSkillsFolder());
 	}
 
 	refreshIfManaged(file: TAbstractFile, oldPath?: string): void {
@@ -100,11 +108,11 @@ export function buildAvailableSkillsPrompt(skills: readonly AgentSkill[]): strin
 	return `<available_skills>\n${body}\n</available_skills>`;
 }
 
-async function ensureBundledSkills(app: App): Promise<void> {
-	const normalizedFolderPath = normalizePath(SKILLS_FOLDER);
+async function ensureBundledSkills(app: App, skillsFolder: string): Promise<void> {
+	const normalizedFolderPath = normalizePath(skillsFolder);
 	const folderExistedBefore = app.vault.getAbstractFileByPath(normalizedFolderPath) instanceof TFolder;
 
-	await ensureFolder(app, SKILLS_FOLDER);
+	await ensureFolder(app, skillsFolder);
 
 	// Only seed bundled skills on first run. If the user deletes a bundled
 	// skill after that, we respect their choice and don't re-create it.
@@ -113,7 +121,7 @@ async function ensureBundledSkills(app: App): Promise<void> {
 	}
 
 	for (const skill of BUNDLED_SKILLS) {
-		const path = normalizePath(`${SKILLS_FOLDER}/${skill.filename}`);
+		const path = normalizePath(`${skillsFolder}/${skill.filename}`);
 		if (app.vault.getAbstractFileByPath(path)) {
 			continue;
 		}
@@ -131,8 +139,8 @@ async function ensureBundledSkills(app: App): Promise<void> {
 	}
 }
 
-async function discoverSkills(app: App): Promise<AgentSkill[]> {
-	const folder = app.vault.getAbstractFileByPath(SKILLS_FOLDER);
+async function discoverSkills(app: App, skillsFolder: string): Promise<AgentSkill[]> {
+	const folder = app.vault.getAbstractFileByPath(skillsFolder);
 	if (!(folder instanceof TFolder)) {
 		return [];
 	}

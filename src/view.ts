@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, ItemView, MarkdownRenderer, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { getFrontMatterInfo, ItemView, MarkdownRenderer, normalizePath, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
@@ -116,7 +116,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume/Load/Open a saved session.", icon: "messages-square" },
 ];
 
-const PORYGON_SESSIONS_FOLDER = "porygon/sessions";
+const PORYGON_SESSIONS_SUBFOLDER = "sessions";
 const PORYGON_FRONTMATTER_DELIMITER = "---";
 const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? • / for commands • @ for mentions";
 const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
@@ -1198,8 +1198,12 @@ export class PorygonView extends ItemView {
 		});
 	}
 
+	private getSessionsFolder(): string {
+		return normalizePath(`${this.plugin.settings.porygonFolder}/${PORYGON_SESSIONS_SUBFOLDER}`);
+	}
+
 	private async getSessionSummaries(): Promise<SessionSummary[]> {
-		const folder = this.plugin.app.vault.getAbstractFileByPath(PORYGON_SESSIONS_FOLDER);
+		const folder = this.plugin.app.vault.getAbstractFileByPath(this.getSessionsFolder());
 		if (!(folder instanceof TFolder)) {
 			return [];
 		}
@@ -1860,9 +1864,10 @@ export class PorygonView extends ItemView {
 		try {
 			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
 			this.currentSessionTitle = title;
-			const filename = `${PORYGON_SESSIONS_FOLDER}/${sessionId}.md`;
+			const sessionsFolder = this.getSessionsFolder();
+			const filename = `${sessionsFolder}/${sessionId}.md`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
-			await this.ensureFolderExists(PORYGON_SESSIONS_FOLDER);
+			await this.ensureFolderExists(sessionsFolder);
 			await this.writeSessionFile(filename, content);
 		} catch (error) {
 			this.showFeedback("error", `Couldn't save the session: ${error instanceof Error ? error.message : String(error)}`);
@@ -2108,12 +2113,25 @@ export class PorygonView extends ItemView {
 	}
 
 	private async ensureFolderExists(path: string): Promise<void> {
-		const existingFolder = this.plugin.app.vault.getAbstractFileByPath(path);
-		if (existingFolder instanceof TFolder) {
-			return;
-		}
+		const segments = normalizePath(path).split("/");
+		let current = "";
+		for (const segment of segments) {
+			current = current ? `${current}/${segment}` : segment;
+			if (this.plugin.app.vault.getAbstractFileByPath(current) instanceof TFolder) {
+				continue;
+			}
 
-		await this.plugin.app.vault.adapter.mkdir(path);
+			try {
+				await this.plugin.app.vault.createFolder(current);
+			} catch (error) {
+				// Race or pre-existing folder: treat as no-op.
+				if (this.plugin.app.vault.getAbstractFileByPath(current) instanceof TFolder) {
+					continue;
+				}
+
+				throw error;
+			}
+		}
 	}
 
 	private toMentionedItem(result: MentionSearchResult): MentionedItem {

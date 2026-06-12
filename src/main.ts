@@ -24,7 +24,7 @@ export default class PorygonPlugin extends Plugin {
 		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
 
 		await this.loadSettings();
-		this.skills = new SkillsService(this.app);
+		this.skills = new SkillsService(this.app, () => this.settings.porygonFolder);
 		this.ragStore = new RagIndexedDbStore(this.app);
 		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
 		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore);
