@@ -34,7 +34,7 @@ Porygon can save short, concrete observations about you and your work as long-te
 
 ### Skills
 
-Skills are reusable instructions that teach Porygon how to handle specific tasks, such as summarizing notes in a consistent format. Porygon stores them as Markdown files in `porygon/skills/` and automatically makes them available to the assistant. To add a new skill, create a `.md` file in that folder with a short YAML header containing `name` and `description`, then write the instructions below it.
+Skills are reusable instructions that teach Porygon how to handle specific tasks, such as summarizing notes in a consistent format. Porygon stores them as Markdown files in the `skills/` subfolder of its internal folder (`porygon/skills/` by default, configurable under **Settings → Porygon → Advanced**) and automatically makes them available to the assistant. To add a new skill, create a `.md` file in that folder with a short YAML header containing `name` and `description`, then write the instructions below it.
 
 ### Personalize your experience
 
@@ -45,7 +45,8 @@ Keep the interface simple and concise, or enable advanced features like model th
 Porygon requires Ollama to be installed and running locally. You can download it from [Ollama](https://ollama.com?utm_source=chatgpt.com) and install a model with:
 
 ```bash
-ollama run gemma4
+ollama pull gemma4:12b # chat model 
+ollama pull qwen3-embedding:8b # embeddings model (search)
 ```
 
 The first time you open Porygon, the onboarding flow will guide you through configuring your Ollama host, chat model, and embeddings model.
