@@ -26,7 +26,7 @@ export default class PorygonPlugin extends Plugin {
 		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
 
 		await this.loadSettings();
-		this.skills = new SkillsService(this.app);
+		this.skills = new SkillsService(this.app, () => this.settings.porygonFolder);
 		this.buildRagPipeline();
 
 		this.registerView(

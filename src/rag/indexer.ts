@@ -13,10 +13,6 @@ const MODIFY_DEBOUNCE_MS = 1500;
 const SETTINGS_RECONCILE_DEBOUNCE_MS = 1000;
 const MAX_CHUNKS_PER_FILE = 256;
 const EMBEDDING_BATCH_SIZE = 16;
-// Porygon's own managed notes (sessions, skills) live under this folder. They
-// are internal plumbing, so they are always excluded from the index regardless
-// of the user-configurable ignore list.
-const INTERNAL_ROOT = "porygon";
 
 type IgnoreMatcher = (path: string) => boolean;
 type PrefetchedFile = { content: string; contentHash: string };
@@ -34,6 +30,7 @@ export class RagIndexer {
 	private ignoreMatcher: IgnoreMatcher;
 	private ignoreSource = "";
 	private watchedFingerprint = "";
+	private watchedInternalRoot = "";
 	private progress: RagIndexProgress = {
 		status: "idle",
 		indexedFiles: 0,
@@ -51,6 +48,7 @@ export class RagIndexer {
 		this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
 		this.ignoreSource = settings.ragIgnoredPaths;
 		this.watchedFingerprint = getActiveProvider(settings).embeddingsFingerprint(settings);
+		this.watchedInternalRoot = settings.porygonFolder;
 	}
 
 	getProgress(): RagIndexProgress {
@@ -205,15 +203,17 @@ export class RagIndexer {
 	updateSettings(settings: PorygonPluginSettings): void {
 		const fingerprintChanged = this.watchedFingerprint !== getActiveProvider(settings).embeddingsFingerprint(settings);
 		const ignoreChanged = this.ignoreSource !== settings.ragIgnoredPaths;
+		const internalRootChanged = this.watchedInternalRoot !== settings.porygonFolder;
 		this.settings = settings;
 		this.watchedFingerprint = getActiveProvider(settings).embeddingsFingerprint(settings);
+		this.watchedInternalRoot = settings.porygonFolder;
 
 		if (ignoreChanged) {
 			this.ignoreMatcher = compileIgnoreMatcher(settings.ragIgnoredPaths);
 			this.ignoreSource = settings.ragIgnoredPaths;
 		}
 
-		if (fingerprintChanged || ignoreChanged) {
+		if (fingerprintChanged || ignoreChanged || internalRootChanged) {
 			this.scheduleReconcile();
 		}
 	}
@@ -364,7 +364,7 @@ export class RagIndexer {
 	}
 
 	private isIgnored(path: string): boolean {
-		return isInternalPath(path) || this.ignoreMatcher(path);
+		return isInternalPath(path, this.settings.porygonFolder) || this.ignoreMatcher(path);
 	}
 
 	private getEmbeddingConfig(): string {
@@ -443,9 +443,16 @@ function normalizeIndexPath(path: string): string {
 	return path.replace(/\\/g, "/").replace(/^\/+/, "").trim();
 }
 
-function isInternalPath(path: string): boolean {
+// Porygon's own managed notes (sessions, skills) live under the configurable
+// internal folder. They are internal plumbing, so they are always excluded
+// from the index regardless of the user-configurable ignore list.
+function isInternalPath(path: string, internalRoot: string): boolean {
 	const normalized = normalizeIndexPath(path);
-	return normalized === INTERNAL_ROOT || normalized.startsWith(`${INTERNAL_ROOT}/`);
+	const normalizedRoot = normalizeIndexPath(internalRoot);
+	if (!normalizedRoot) {
+		return false;
+	}
+	return normalized === normalizedRoot || normalized.startsWith(`${normalizedRoot}/`);
 }
 
 function sleep(ms: number): Promise<void> {

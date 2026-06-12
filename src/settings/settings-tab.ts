@@ -1,8 +1,8 @@
-import { debounce, PluginSettingTab, Setting } from "obsidian";
+import { debounce, Notice, PluginSettingTab, Setting } from "obsidian";
 import PorygonPlugin from "../main";
 import { getActiveProvider } from "../providers";
 import { getRagRetrievalDefinitions, getRagStoreDefinitions, RagIndexProgress, RagRetrievalStrategyId, RagStoreBackendId } from "../rag";
-import { ONBOARDING_DEFAULTS } from "./settings";
+import { movePorygonFolder, DEFAULT_PORYGON_FOLDER, ONBOARDING_DEFAULTS } from "./settings";
 import type { ThinkingEffort } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
@@ -15,6 +15,11 @@ export class PorygonSettingTab extends PluginSettingTab {
 	private modelCapabilities: Record<string, string[]> = {};
 	private modelsHost: string | null = null;
 	private modelsStatus: "loading" | "ok" | "error" = "loading";
+	// Draft for the Porygon folder input. Only the Apply button commits it;
+	// kept on the instance so re-renders (e.g. model list loading) don't
+	// clobber what the user typed.
+	private porygonFolderDraft: string | null = null;
+	private isMovingPorygonFolder = false;
 	private readonly persist = debounce(() => {
 		void this.plugin.saveSettings();
 	}, 400, true);
@@ -42,6 +47,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.unsubscribeProgress?.();
 		this.unsubscribeProgress = null;
 		this.statusSetting = null;
+		this.porygonFolderDraft = null;
 	}
 
 	private renderSections(): void {
@@ -173,6 +179,75 @@ export class PorygonSettingTab extends PluginSettingTab {
 				textArea.inputEl.addClass("porygon-settings-ignored-paths");
 			});
 		ignoredPathsSetting.settingEl.addClass("porygon-settings-textarea-setting");
+
+		this.renderSectionHeading(containerEl, "Advanced", "Advanced behavior. Most users won't need to change these.");
+
+		const advancedGroup = containerEl.createDiv({ cls: "setting-group" });
+		const advancedItems = advancedGroup.createDiv({ cls: "setting-items" });
+		this.renderPorygonFolderSetting(advancedItems);
+	}
+
+	private renderPorygonFolderSetting(containerEl: HTMLElement): void {
+		let inputEl: HTMLInputElement | null = null;
+		let buttonEl: HTMLButtonElement | null = null;
+
+		const syncDisabled = () => {
+			const busy = this.isMovingPorygonFolder;
+			if (inputEl) inputEl.disabled = busy;
+			if (buttonEl) {
+				buttonEl.disabled = busy;
+				buttonEl.setText(busy ? "Moving..." : "Apply");
+			}
+		};
+
+		new Setting(containerEl)
+			.setName("Porygon folder")
+			.setDesc("Vault folder where the assistant stores its internal notes (sessions, skills). Applying moves the current folder and its contents to the new location.")
+			.addText((text) => {
+				text
+					.setPlaceholder(DEFAULT_PORYGON_FOLDER)
+					.setValue(this.porygonFolderDraft ?? this.plugin.settings.porygonFolder)
+					.onChange((value) => {
+						this.porygonFolderDraft = value;
+					});
+				inputEl = text.inputEl;
+			})
+			.addButton((button) => {
+				button
+					.setButtonText("Apply")
+					.setCta()
+					.onClick(() => { void applyMove(); });
+				buttonEl = button.buttonEl;
+			});
+
+		syncDisabled();
+
+		const applyMove = async () => {
+			if (this.isMovingPorygonFolder) {
+				return;
+			}
+
+			const requested = this.porygonFolderDraft ?? this.plugin.settings.porygonFolder;
+			this.isMovingPorygonFolder = true;
+			syncDisabled();
+			try {
+				const result = await movePorygonFolder(this.plugin, requested);
+				this.porygonFolderDraft = null;
+				if (result === "unchanged") {
+					new Notice("Porygon folder is already set to that path.");
+				} else if (result === "adopted") {
+					new Notice(`Porygon folder set to "${this.plugin.settings.porygonFolder}".`);
+				} else {
+					new Notice(`Porygon folder moved to "${this.plugin.settings.porygonFolder}".`);
+				}
+			} catch (error) {
+				new Notice(`Couldn't move the Porygon folder: ${error instanceof Error ? error.message : String(error)}`);
+			} finally {
+				this.isMovingPorygonFolder = false;
+				syncDisabled();
+				this.refresh();
+			}
+		};
 	}
 
 	// Store backend and retrieval strategy come from the rag registries. Each
