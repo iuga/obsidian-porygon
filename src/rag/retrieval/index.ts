@@ -1,10 +1,12 @@
 import type { PorygonPluginSettings } from "../../settings/settings";
 import type { RagRetriever, RagStore } from "../types";
 import { CosineBruteForceRetriever } from "./cosine-bruteforce";
+import { OramaHybridRetriever } from "./orama-hybrid";
 
 export { CosineBruteForceRetriever, cosineSimilarity } from "./cosine-bruteforce";
+export { OramaHybridRetriever } from "./orama-hybrid";
 
-export type RagRetrievalStrategyId = "cosine";
+export type RagRetrievalStrategyId = "cosine" | "orama-hybrid";
 
 export interface RagRetrievalDefinition {
 	id: RagRetrievalStrategyId;
@@ -22,6 +24,12 @@ const STRATEGIES: Record<RagRetrievalStrategyId, RagRetrievalDefinition> = {
 		name: "Cosine similarity (exact)",
 		isCompatible: () => true,
 		create: (store) => new CosineBruteForceRetriever(store),
+	},
+	"orama-hybrid": {
+		id: "orama-hybrid",
+		name: "Hybrid (BM25 + semantic)",
+		isCompatible: () => true,
+		create: (store) => new OramaHybridRetriever(store),
 	},
 };
 

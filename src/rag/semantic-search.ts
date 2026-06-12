@@ -43,13 +43,19 @@ export class RagSemanticSearchService {
 
 		const embeddings = this.getEmbeddingsClient();
 		const queryVector = new Float32Array(await embeddings.embedQuery(query));
-		const matches = await this.retriever.retrieve(queryVector, this.settings.ollamaEmbeddingModel, limit);
+		const matches = await this.retriever.retrieve({
+			text: query,
+			vector: queryVector,
+			embeddingModel: this.settings.ollamaEmbeddingModel,
+			limit,
+		});
 		if (matches.length === 0) {
 			console.debug("[Porygon RAG] semantic search results", {
 				query,
 				matchCount: 0,
 				results: [],
 			});
+			console.debug(`[Porygon RAG] search "${query}" → 0 results`);
 			return [];
 		}
 
@@ -80,6 +86,14 @@ export class RagSemanticSearchService {
 				snippet: result.text.slice(0, 200),
 			})),
 		});
+		console.debug(`[Porygon RAG] search "${query}" → ${results.length} results`);
+		// eslint-disable-next-line obsidianmd/rule-custom-message -- dev-facing ranking table; console.table has no debug-level equivalent.
+		console.table(results.map((result) => ({
+			path: result.path,
+			i: result.chunkIndex,
+			score: result.score.toFixed(4),
+			snippet: result.text.slice(0, 80),
+		})));
 		return results;
 	}
 

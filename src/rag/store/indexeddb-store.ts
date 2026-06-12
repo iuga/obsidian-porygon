@@ -1,6 +1,6 @@
 import { deleteDB, DBSchema, IDBPDatabase, IDBPTransaction, openDB } from "idb";
 import type { App } from "obsidian";
-import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagStore, RagVectorRecord } from "../types";
+import { RagChunkRecord, RagFileFreshnessInput, RagFileRecord, RagIndexedFileInput, RagStore, RagStoreChangeEvent, RagVectorRecord } from "../types";
 
 const RAG_DATABASE_PREFIX = "porygon";
 const LEGACY_RAG_DATABASE_NAME = "porygon-rag";
@@ -49,10 +49,26 @@ type RagStoreNames = ["files", "chunks", "vectors"];
 export class RagIndexedDbStore implements RagStore {
 	private dbPromise: Promise<IDBPDatabase<PorygonRagDatabase>> | null = null;
 	private readonly databaseName: string;
+	private readonly changeListeners = new Set<(event: RagStoreChangeEvent) => void>();
 
 	constructor(app: App) {
 		this.databaseName = buildRagDatabaseName(app);
 		void this.deleteStaleDatabases(app);
+	}
+
+	subscribe(listener: (event: RagStoreChangeEvent) => void): () => void {
+		this.changeListeners.add(listener);
+		return () => this.changeListeners.delete(listener);
+	}
+
+	private emit(event: RagStoreChangeEvent): void {
+		for (const listener of this.changeListeners) {
+			try {
+				listener(event);
+			} catch (error) {
+				console.warn("[Porygon RAG] store change listener failed", error);
+			}
+		}
 	}
 
 	// One-time cleanup of databases superseded by the current schema version so
@@ -122,6 +138,7 @@ export class RagIndexedDbStore implements RagStore {
 			...input.vectors.map((vector) => vectorsStore.put(vector)),
 		]);
 		await tx.done;
+		this.emit({ type: "replace", input });
 	}
 
 	async deleteFile(path: string): Promise<void> {
@@ -139,6 +156,7 @@ export class RagIndexedDbStore implements RagStore {
 			await this.deleteFileRecordsInTransaction(tx, path);
 		}
 		await tx.done;
+		this.emit({ type: "delete", paths });
 	}
 
 	async clearIndex(): Promise<void> {
@@ -150,6 +168,7 @@ export class RagIndexedDbStore implements RagStore {
 			tx.objectStore(VECTORS_STORE).clear(),
 		]);
 		await tx.done;
+		this.emit({ type: "clear" });
 	}
 
 	async getChunksForFile(path: string): Promise<RagChunkRecord[]> {

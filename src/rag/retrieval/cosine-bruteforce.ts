@@ -1,9 +1,10 @@
 import { arrayBufferToFloat32Array } from "../store/vector-codec";
-import type { RagRetrievalMatch, RagRetriever, RagStore } from "../types";
+import type { RagRetrievalMatch, RagRetrievalQuery, RagRetriever, RagStore } from "../types";
 
 // Exact retrieval: scores every stored vector with cosine similarity. Works
 // against any RagStore; fine for vault-sized indexes, replaceable with an
-// ANN or store-native strategy through the retrieval registry.
+// ANN or store-native strategy through the retrieval registry. Ignores
+// `query.text` — this is a vector-only strategy.
 export class CosineBruteForceRetriever implements RagRetriever {
 	private store: RagStore;
 
@@ -11,16 +12,16 @@ export class CosineBruteForceRetriever implements RagRetriever {
 		this.store = store;
 	}
 
-	async retrieve(queryVector: Float32Array, embeddingModel: string, limit: number): Promise<RagRetrievalMatch[]> {
-		const vectors = await this.store.getVectorsForEmbeddingModel(embeddingModel);
+	async retrieve(query: RagRetrievalQuery): Promise<RagRetrievalMatch[]> {
+		const vectors = await this.store.getVectorsForEmbeddingModel(query.embeddingModel);
 		return vectors
 			.map((vector) => ({
 				chunkId: vector.chunkId,
-				score: cosineSimilarity(queryVector, arrayBufferToFloat32Array(vector.vector)),
+				score: cosineSimilarity(query.vector, arrayBufferToFloat32Array(vector.vector)),
 			}))
 			.filter((match) => Number.isFinite(match.score))
 			.sort((left, right) => right.score - left.score)
-			.slice(0, limit);
+			.slice(0, query.limit);
 	}
 }
 

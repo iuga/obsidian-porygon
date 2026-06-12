@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
-import { createRagRetriever, createRagStore, RagIndexer, RagSemanticSearchService, RagStore } from "./rag";
+import { createRagRetriever, createRagStore, OramaHybridRetriever, RagIndexer, RagRetriever, RagSemanticSearchService, RagStore } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
 import { PorygonSettingTab } from "./settings/settings-tab";
 import { sanitizeMemories } from "./agent/memories";
@@ -15,6 +15,7 @@ export default class PorygonPlugin extends Plugin {
 	ragSemanticSearch: RagSemanticSearchService;
 	skills: SkillsService;
 	private ragStore: RagStore;
+	private ragRetriever: RagRetriever;
 	private activeRagStoreBackend: string;
 	private activeRagRetrievalStrategy: string;
 
@@ -50,11 +51,13 @@ export default class PorygonPlugin extends Plugin {
 				console.error("[Porygon Skills] failed to initialize", error);
 			});
 			void this.ragIndexer.reconcile();
+			this.warmRagRetriever();
 		});
 	}
 
 	onunload(): void {
 		this.ragIndexer?.dispose();
+		this.ragRetriever?.dispose?.();
 		void this.ragStore?.close();
 	}
 
@@ -105,9 +108,23 @@ export default class PorygonPlugin extends Plugin {
 	private buildRagPipeline(): void {
 		this.ragStore = createRagStore(this.app, this.settings);
 		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
-		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore, createRagRetriever(this.settings, this.ragStore));
+		this.ragRetriever = createRagRetriever(this.settings, this.ragStore);
+		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore, this.ragRetriever);
 		this.activeRagStoreBackend = this.settings.ragStoreBackend;
 		this.activeRagRetrievalStrategy = this.settings.ragRetrievalStrategy;
+	}
+
+	// Pre-builds in-memory retrieval indexes (Orama) off the critical path so
+	// the first search doesn't pay the build cost.
+	private warmRagRetriever(): void {
+		const retriever = this.ragRetriever;
+		if (!(retriever instanceof OramaHybridRetriever)) {
+			return;
+		}
+		window.requestIdleCallback(
+			() => retriever.warmUp(this.settings.ollamaEmbeddingModel),
+			{ timeout: 10_000 },
+		);
 	}
 
 	// Tears down the active pipeline and rebuilds it from settings (used when
@@ -115,6 +132,7 @@ export default class PorygonPlugin extends Plugin {
 	// handlers call through `this.ragIndexer`, so no re-registration is needed.
 	private async rebuildRagPipeline(): Promise<void> {
 		this.ragIndexer.dispose();
+		this.ragRetriever.dispose?.();
 		const previousStore = this.ragStore;
 		this.buildRagPipeline();
 		try {
@@ -123,6 +141,7 @@ export default class PorygonPlugin extends Plugin {
 			console.warn("[Porygon RAG] failed to close previous store", error);
 		}
 		void this.ragIndexer.reconcile();
+		this.warmRagRetriever();
 	}
 
 	private registerSkillEvents(): void {
