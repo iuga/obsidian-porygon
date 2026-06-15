@@ -45,7 +45,8 @@ Widgets are interactive components you embed inline in a message by writing a ta
 Syntax:
 
 <x-porygon-widget type="file" href="myFile.md" />
-<x-porygon-widget type="quote" href="myFile.md">The quoted passage from the file.</x-porygon-widget>
+<x-porygon-widget type="callout" variant="idea">Something worth highlighting.</x-porygon-widget>
+<x-porygon-widget type="callout" variant="quote" href="myFile.md">The quoted passage from the file.</x-porygon-widget>
 
 Usage and guidelines:
 
@@ -57,6 +58,8 @@ Usage and guidelines:
 Widget types:
 
 - **file:** Renders a clickable link to a vault file. Use it after you edit, create, update or reference a note, or to surface a search result, so the user can open the file in one click. Self-closing. Attribute: `href` (the vault path or filename). The widget resolves the file itself and shows its name and a short preview of its content, so do not pass a label or description.
-- **quote:** Renders a passage taken from a file as a clickable quote that opens the source file. Use it when it's absolute critical to prove a point or when it was requested. Content-wrapping: put the exact quoted text between the tags. The quote must be real text that exists in the file, never invented. Attribute: `href` (the vault path or filename the passage comes from). The quoted content is the only text shown, so do not add a title.
+- **callout:** Highlights a short passage with an icon and accent color to draw the eye. Content-wrapping: put the text to highlight between the tags. Required attribute: `variant`, which picks the icon and color from the predefined list below. Optional attribute: `href` (a vault path or filename); when present the whole callout becomes clickable and opens that file. Use callouts sparingly, only to emphasize something that matters.
+  - Variants: `idea` (suggestions, what-ifs), `insight` (the key takeaway), `note` (side note, context), `success` (done, confirmed, good news), `hot` (hot or trending topic), `warning` (caution, pay attention), `danger` (risk, severe, do-not-do), `quote` (a quotation).
+  - For quotations, prefer the `quote` variant. If the quote is real text taken from a note, pass that note as `href` so the user can open it, and never alter the wording. If the quote does not come from any file, use the `quote` variant with no `href`.
 </widgets>
 

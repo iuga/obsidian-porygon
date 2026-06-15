@@ -2,11 +2,32 @@ import { getFrontMatterInfo, MarkdownRenderer, normalizePath, setIcon, TFile } f
 import { ContentSegment, WidgetContext, WidgetDescriptor, WidgetRenderer } from "./types";
 
 // type -> renderer. New widget types register here without touching the
-// render pipeline or the parser. `file` and `quote` ship at launch.
+// render pipeline or the parser. `file` and `callout` ship at launch.
 const WIDGET_RENDERERS: Record<string, WidgetRenderer> = {
 	file: renderFileWidget,
-	quote: renderQuoteWidget,
+	callout: renderCalloutWidget,
 };
+
+// Predefined callout variants. The agent only picks a semantic `variant`;
+// the icon and accent color are fixed here so callouts stay consistent
+// and theme correctly via Obsidian's color vars. Unknown/missing variants
+// fall back to DEFAULT_CALLOUT_VARIANT.
+interface CalloutVariant {
+	icon: string;
+	color: string;
+}
+const CALLOUT_VARIANTS: Record<string, CalloutVariant> = {
+	idea: { icon: "lightbulb", color: "var(--color-yellow)" },
+	insight: { icon: "sparkles", color: "var(--color-purple)" },
+	note: { icon: "info", color: "var(--color-blue)" },
+	success: { icon: "circle-check", color: "var(--color-green)" },
+	hot: { icon: "flame", color: "var(--color-pink)" },
+	warning: { icon: "triangle-alert", color: "var(--color-orange)" },
+	danger: { icon: "octagon-alert", color: "var(--color-red)" },
+	quote: { icon: "quote", color: "var(--text-muted)" },
+};
+const DEFAULT_CALLOUT_VARIANT = "note";
+const DEFAULT_CALLOUT: CalloutVariant = { icon: "info", color: "var(--color-blue)" };
 
 const FILE_DESCRIPTION_MAX_LENGTH = 140;
 
@@ -88,40 +109,61 @@ async function renderFileWidget(containerEl: HTMLElement, descriptor: WidgetDesc
 }
 
 /**
- * Quote widget. Wraps a passage taken from a file (`body`) and links back
- * to it (`href`). The quoted content is the widget's only text: no title.
- * Clicking anywhere on the quote opens the source file. A blank body or a
- * missing href degrades to nothing, since a quote with no passage or no
- * source has nothing meaningful to show.
+ * Callout widget. Highlights a passage (`body`) with a predefined icon
+ * and accent color chosen by `variant`. `href` is optional: when present
+ * the whole callout becomes a clickable card that opens the source file
+ * (e.g. variant="quote" with an href is a quote pulled from a note); when
+ * absent it is a static highlight (e.g. variant="quote" alone is a quote
+ * with no source). A blank body degrades to nothing.
  */
-function renderQuoteWidget(containerEl: HTMLElement, descriptor: WidgetDescriptor, ctx: WidgetContext): void {
-	const href = (descriptor.attrs.href ?? "").trim();
-	const quote = (descriptor.body ?? "").trim();
-	if (!href || !quote) {
+function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescriptor, ctx: WidgetContext): void {
+	const text = (descriptor.body ?? "").trim();
+	if (!text) {
 		return;
 	}
 
-	const widgetEl = containerEl.createDiv({ cls: "porygon-widget porygon-widget-file porygon-widget-quote" });
-	const linkEl = widgetEl.createEl("a", {
-		cls: "porygon-widget-file-link",
-		attr: { href, "aria-label": quote, role: "link", tabindex: "0" },
-	});
-	const iconEl = linkEl.createSpan({ cls: "porygon-widget-file-icon" });
-	setIcon(iconEl, "quote");
-	const bodyEl = linkEl.createDiv({ cls: "porygon-widget-file-body" });
-	bodyEl.createSpan({ cls: "porygon-widget-quote-text", text: quote });
+	const { key: variantKey, icon, color } = resolveCalloutVariant(descriptor.attrs.variant);
+	const href = (descriptor.attrs.href ?? "").trim();
+
+	const widgetEl = containerEl.createDiv({ cls: "porygon-widget porygon-widget-callout" });
+	widgetEl.addClass(`is-${variantKey}`);
+	widgetEl.style.setProperty("--porygon-callout-color", color);
+
+	const cardEl: HTMLElement = href
+		? widgetEl.createEl("a", {
+			cls: "porygon-widget-callout-card is-link",
+			attr: { href, "aria-label": text, role: "link", tabindex: "0" },
+		})
+		: widgetEl.createDiv({ cls: "porygon-widget-callout-card" });
+
+	const iconEl = cardEl.createSpan({ cls: "porygon-widget-callout-icon" });
+	setIcon(iconEl, icon);
+	cardEl.createSpan({ cls: "porygon-widget-callout-text", text });
+
+	if (!href) {
+		return;
+	}
 
 	const open = (event: MouseEvent | KeyboardEvent) => {
 		event.preventDefault();
 		ctx.openLink(href, event.ctrlKey || event.metaKey);
 	};
-	linkEl.addEventListener("click", open);
-	linkEl.addEventListener("keydown", (event) => {
+	cardEl.addEventListener("click", open);
+	cardEl.addEventListener("keydown", (event) => {
 		if (event.key !== "Enter" && event.key !== " ") {
 			return;
 		}
 		open(event);
 	});
+}
+
+function resolveCalloutVariant(rawVariant: string | undefined): { key: string; icon: string; color: string } {
+	const key = (rawVariant ?? "").trim().toLowerCase();
+	const variant = CALLOUT_VARIANTS[key];
+	if (variant) {
+		return { key, ...variant };
+	}
+	return { key: DEFAULT_CALLOUT_VARIANT, ...DEFAULT_CALLOUT };
 }
 
 function resolveVaultFile(ctx: WidgetContext, href: string): TFile | null {

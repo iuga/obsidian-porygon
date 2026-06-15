@@ -1172,8 +1172,47 @@
 	font-size: var(--font-ui-small);
 }
 
-.porygon-widget-quote-text {
-	font-style: italic;
+.porygon-widget-callout .porygon-widget-callout-card {
+	display: flex;
+	width: 100%;
+	align-items: flex-start;
+	gap: var(--size-2-3);
+	padding: var(--size-4-2) var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--porygon-callout-color, var(--text-muted));
+	border-radius: var(--radius-m);
+	box-shadow: none;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	text-decoration: none;
+}
+
+.porygon-widget-callout .porygon-widget-callout-card.is-link {
+	cursor: pointer;
+}
+
+.porygon-widget-callout .porygon-widget-callout-card.is-link:hover {
+	background: var(--background-modifier-hover);
+}
+
+.porygon-widget-callout-icon {
+	display: flex;
+	flex: 0 0 auto;
+	margin-top: 2px;
+	color: var(--porygon-callout-color, var(--text-muted));
+}
+
+.porygon-widget-callout-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.porygon-widget-callout-text {
+	min-width: 0;
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+.porygon-widget-callout.is-quote .porygon-widget-callout-text {
+	font-style: italic;
 }
