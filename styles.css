@@ -1103,3 +1103,77 @@
 .porygon-welcome .porygon-primary-button {
 	align-self: center;
 }
+
+.porygon-widget {
+	display: block;
+	width: 100%;
+	margin: var(--size-4-2) 0;
+}
+
+.porygon-widget-file .porygon-widget-file-link,
+.porygon-widget-file.is-missing {
+	display: flex;
+	width: 100%;
+	align-items: flex-start;
+	gap: var(--size-2-3);
+	padding: var(--size-4-2) var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: none;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	text-decoration: none;
+}
+
+.porygon-widget-file .porygon-widget-file-link {
+	cursor: pointer;
+}
+
+.porygon-widget-file .porygon-widget-file-link:hover {
+	background: var(--background-modifier-hover);
+}
+
+.porygon-widget-file.is-missing {
+	color: var(--text-muted);
+}
+
+.porygon-widget-file-icon {
+	display: flex;
+	flex: 0 0 auto;
+	margin-top: 2px;
+	color: var(--text-muted);
+}
+
+.porygon-widget-file-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.porygon-widget-file-body {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: var(--size-2-1);
+}
+
+.porygon-widget-file-label {
+	overflow: hidden;
+	font-weight: var(--font-medium);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.porygon-widget-file-description {
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.porygon-widget-quote-text {
+	font-style: italic;
+	white-space: pre-wrap;
+	word-break: break-word;
+}

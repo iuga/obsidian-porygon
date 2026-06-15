@@ -7,6 +7,7 @@ interface ChatListDeps {
 	component: Component;
 	showThinking: () => boolean;
 	showToolUsage: () => boolean;
+	openLink: (href: string, newLeaf: boolean) => void;
 }
 
 const EMPTY_QUOTE_CLASS = "porygon-empty-chat-quote";
@@ -140,6 +141,7 @@ export class ChatList {
 					component: this.deps.component,
 					showThinking: this.deps.showThinking,
 		showToolUsage: this.deps.showToolUsage,
+					openLink: this.deps.openLink,
 				});
 				this.rows.set(message, row);
 				this.resizeObserver?.observe(row.el);

@@ -291,6 +291,7 @@ export class PorygonView extends ItemView {
 				component: this,
 				showThinking: () => this.plugin.settings.showThinking,
 				showToolUsage: () => this.plugin.settings.showToolUsage,
+				openLink: (href, newLeaf) => void this.plugin.app.workspace.openLinkText(href, "/", newLeaf),
 			});
 		}
 		const emptyQuote = this.messages.length === 0 ? this.getDailyEmptyChatQuote() : undefined;
