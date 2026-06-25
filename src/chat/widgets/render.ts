@@ -1,4 +1,5 @@
 import { getFrontMatterInfo, MarkdownRenderer, normalizePath, setIcon, TFile } from "obsidian";
+import { wikifyNoteLinks } from "../../utils/links";
 import { ContentSegment, WidgetContext, WidgetDescriptor, WidgetRenderer } from "./types";
 
 // type -> renderer. New widget types register here without touching the
@@ -42,7 +43,7 @@ const FILE_DESCRIPTION_MAX_LENGTH = 140;
 export async function renderSegments(segments: ContentSegment[], target: HTMLElement, ctx: WidgetContext): Promise<void> {
 	for (const segment of segments) {
 		if (segment.kind === "text") {
-			await MarkdownRenderer.render(ctx.app, segment.text, target, "/", ctx.component);
+			await MarkdownRenderer.render(ctx.app, wikifyNoteLinks(segment.text), target, "/", ctx.component);
 			continue;
 		}
 		await renderWidget(target, segment.descriptor, ctx);
