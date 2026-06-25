@@ -17,18 +17,18 @@ interface CalloutVariant {
 	icon: string;
 	color: string;
 }
+const DEFAULT_CALLOUT_VARIANT = "note";
+const DEFAULT_CALLOUT: CalloutVariant = { icon: "info", color: "var(--color-blue)" };
 const CALLOUT_VARIANTS: Record<string, CalloutVariant> = {
 	idea: { icon: "lightbulb", color: "var(--color-yellow)" },
 	insight: { icon: "sparkles", color: "var(--color-purple)" },
-	note: { icon: "info", color: "var(--color-blue)" },
+	[DEFAULT_CALLOUT_VARIANT]: DEFAULT_CALLOUT,
 	success: { icon: "circle-check", color: "var(--color-green)" },
 	hot: { icon: "flame", color: "var(--color-pink)" },
 	warning: { icon: "triangle-alert", color: "var(--color-orange)" },
 	danger: { icon: "octagon-alert", color: "var(--color-red)" },
 	quote: { icon: "quote", color: "var(--text-muted)" },
 };
-const DEFAULT_CALLOUT_VARIANT = "note";
-const DEFAULT_CALLOUT: CalloutVariant = { icon: "info", color: "var(--color-blue)" };
 
 const FILE_DESCRIPTION_MAX_LENGTH = 140;
 
@@ -37,8 +37,8 @@ const FILE_DESCRIPTION_MAX_LENGTH = 140;
  * through Obsidian's MarkdownRenderer; widget segments are built by the
  * registry. Both are awaited so segment order holds even when a renderer
  * is async (the file widget reads vault content for its description).
- * Unknown widget types fall back to their raw attributes as plain text so
- * a future tag never renders as a blank gap on older clients.
+ * Unknown widget types degrade to a plain-text fallback so a future tag
+ * never renders as a blank gap on older clients.
  */
 export async function renderSegments(segments: ContentSegment[], target: HTMLElement, ctx: WidgetContext): Promise<void> {
 	for (const segment of segments) {
@@ -81,7 +81,7 @@ async function renderFileWidget(containerEl: HTMLElement, descriptor: WidgetDesc
 	const widgetEl = containerEl.createDiv({ cls: "porygon-widget porygon-widget-file" });
 	const linkEl = widgetEl.createEl("a", {
 		cls: "porygon-widget-file-link",
-		attr: { href, "aria-label": file.basename, role: "link", tabindex: "0" },
+		attr: { "data-href": href, "aria-label": file.basename, role: "link", tabindex: "0" },
 	});
 	const iconEl = linkEl.createSpan({ cls: "porygon-widget-file-icon" });
 	setIcon(iconEl, "file-text");
@@ -96,17 +96,7 @@ async function renderFileWidget(containerEl: HTMLElement, descriptor: WidgetDesc
 		descriptionEl.remove();
 	}
 
-	linkEl.addEventListener("click", (event) => {
-		event.preventDefault();
-		ctx.openLink(href, event.ctrlKey || event.metaKey);
-	});
-	linkEl.addEventListener("keydown", (event) => {
-		if (event.key !== "Enter" && event.key !== " ") {
-			return;
-		}
-		event.preventDefault();
-		ctx.openLink(href, event.ctrlKey || event.metaKey);
-	});
+	bindOpenLink(linkEl, href, ctx);
 }
 
 /**
@@ -133,7 +123,7 @@ function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescrip
 	const cardEl: HTMLElement = href
 		? widgetEl.createEl("a", {
 			cls: "porygon-widget-callout-card is-link",
-			attr: { href, "aria-label": text, role: "link", tabindex: "0" },
+			attr: { "data-href": href, "aria-label": text, role: "link", tabindex: "0" },
 		})
 		: widgetEl.createDiv({ cls: "porygon-widget-callout-card" });
 
@@ -145,12 +135,21 @@ function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescrip
 		return;
 	}
 
+	bindOpenLink(cardEl, href, ctx);
+}
+
+/**
+ * Wires a clickable element to open `href` through the host. Click and
+ * keyboard (Enter/Space) both route to ctx.openLink, with ctrl/meta
+ * opening in a new leaf. Shared by every widget that renders a link.
+ */
+function bindOpenLink(el: HTMLElement, href: string, ctx: WidgetContext): void {
 	const open = (event: MouseEvent | KeyboardEvent) => {
 		event.preventDefault();
 		ctx.openLink(href, event.ctrlKey || event.metaKey);
 	};
-	cardEl.addEventListener("click", open);
-	cardEl.addEventListener("keydown", (event) => {
+	el.addEventListener("click", open);
+	el.addEventListener("keydown", (event) => {
 		if (event.key !== "Enter" && event.key !== " ") {
 			return;
 		}
