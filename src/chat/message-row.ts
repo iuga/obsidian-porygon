@@ -1,13 +1,14 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
-import { wikifyNoteLinks } from "../utils/links";
 import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
+import { parseMessageContent, renderSegments, WidgetContext } from "./widgets";
 
 interface MessageRowDeps {
 	app: App;
 	component: Component;
 	showThinking: () => boolean;
 	showToolUsage: () => boolean;
+	openLink: (href: string, newLeaf: boolean) => void;
 	onMentionClickRemove?: (path: string) => void;
 }
 
@@ -26,6 +27,7 @@ export class MessageRow {
 	readonly el: HTMLElement;
 	private message: ChatMessage;
 	private deps: MessageRowDeps;
+	private widgetContext: WidgetContext;
 
 	// Last strings committed to the DOM, used as equality guards so a
 	// no-op delta or a redundant update() doesn't repeat markdown work.
@@ -70,6 +72,11 @@ export class MessageRow {
 	constructor(message: ChatMessage, deps: MessageRowDeps) {
 		this.message = message;
 		this.deps = deps;
+		this.widgetContext = {
+			app: deps.app,
+			component: deps.component,
+			openLink: deps.openLink,
+		};
 		this.el = activeDocument.createElement("div");
 		this.el.addClass("porygon-message-row", `is-${message.role}`);
 		this.buildSkeleton();
@@ -408,7 +415,7 @@ export class MessageRow {
 			if (forceFull || streamingTransition || message.content !== this.renderedContent) {
 				this.contentEl.empty();
 				this.renderedContent = message.content;
-				void MarkdownRenderer.render(this.deps.app, wikifyNoteLinks(message.content), this.contentEl, "/", this.deps.component);
+				void renderSegments(parseMessageContent(message.content), this.contentEl, this.widgetContext);
 			}
 			return;
 		}
@@ -493,7 +500,7 @@ export class MessageRow {
 		const run = (async () => {
 			try {
 				const staging = activeDocument.createElement("div");
-				await MarkdownRenderer.render(this.deps.app, wikifyNoteLinks(snapshot), staging, "/", this.deps.component);
+				await renderSegments(parseMessageContent(snapshot), staging, this.widgetContext);
 				if (this.contentEl !== target) return;
 				target.empty();
 				while (staging.firstChild) {
