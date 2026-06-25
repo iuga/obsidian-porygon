@@ -1,4 +1,5 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
+import { wikifyNoteLinks } from "../utils/links";
 import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
 
@@ -407,7 +408,7 @@ export class MessageRow {
 			if (forceFull || streamingTransition || message.content !== this.renderedContent) {
 				this.contentEl.empty();
 				this.renderedContent = message.content;
-				void MarkdownRenderer.render(this.deps.app, message.content, this.contentEl, "/", this.deps.component);
+				void MarkdownRenderer.render(this.deps.app, wikifyNoteLinks(message.content), this.contentEl, "/", this.deps.component);
 			}
 			return;
 		}
@@ -492,7 +493,7 @@ export class MessageRow {
 		const run = (async () => {
 			try {
 				const staging = activeDocument.createElement("div");
-				await MarkdownRenderer.render(this.deps.app, snapshot, staging, "/", this.deps.component);
+				await MarkdownRenderer.render(this.deps.app, wikifyNoteLinks(snapshot), staging, "/", this.deps.component);
 				if (this.contentEl !== target) return;
 				target.empty();
 				while (staging.firstChild) {
