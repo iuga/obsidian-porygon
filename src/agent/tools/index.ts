@@ -13,7 +13,6 @@ import { createLoadSkillTool } from "./load-skill";
 import { createRenameTool } from "./rename";
 import { createSaveMemoryTool } from "./save-memory";
 import { createSearchTool } from "./search";
-import { createSemanticSearchTool } from "./semantic-search";
 import { createViewTool } from "./view";
 
 export type { AskUserInterruptPayload } from "./shared";
@@ -27,8 +26,7 @@ export function createAgentTools(
 	memoriesStore: MemoriesStore,
 ) {
 	return [
-		createSemanticSearchTool(app, semanticSearch, getIndexProgress),
-		createSearchTool(app),
+		createSearchTool(app, semanticSearch, getIndexProgress),
 		createListTool(app),
 		createViewTool(app),
 		createEditTool(app, getYolo),

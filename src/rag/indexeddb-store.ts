@@ -49,10 +49,18 @@ type RagStoreNames = ["files", "chunks", "vectors"];
 export class RagIndexedDbStore {
 	private dbPromise: Promise<IDBPDatabase<PorygonRagDatabase>> | null = null;
 	private readonly databaseName: string;
+	// Monotonic counter bumped on every write (replace/delete/clear). Read-side
+	// caches (e.g. the semantic search Orama index) compare it cheaply to detect
+	// staleness and lazily rebuild, without observing IndexedDB directly.
+	private mutationVersion = 0;
 
 	constructor(app: App) {
 		this.databaseName = buildRagDatabaseName(app);
 		void this.deleteStaleDatabases(app);
+	}
+
+	getMutationVersion(): number {
+		return this.mutationVersion;
 	}
 
 	// One-time cleanup of databases superseded by the current schema version so
@@ -122,6 +130,7 @@ export class RagIndexedDbStore {
 			...input.vectors.map((vector) => vectorsStore.put(vector)),
 		]);
 		await tx.done;
+		this.mutationVersion++;
 	}
 
 	async deleteFile(path: string): Promise<void> {
@@ -139,6 +148,7 @@ export class RagIndexedDbStore {
 			await this.deleteFileRecordsInTransaction(tx, path);
 		}
 		await tx.done;
+		this.mutationVersion++;
 	}
 
 	async clearIndex(): Promise<void> {
@@ -150,6 +160,7 @@ export class RagIndexedDbStore {
 			tx.objectStore(VECTORS_STORE).clear(),
 		]);
 		await tx.done;
+		this.mutationVersion++;
 	}
 
 	async getChunksForFile(path: string): Promise<RagChunkRecord[]> {

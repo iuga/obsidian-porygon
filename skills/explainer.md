@@ -13,7 +13,7 @@ Search before writing. Even for familiar topics. Stop when you can answer:
 - Why does it exist?
 - When does it break or get contested?
 
-Prefer primary sources using the `semantic_search` then `search` tools. Cross-check load-bearing claims in two sources. Note versions and dates. When sources disagree, do not pick a side silently; carry the disagreement into the output.
+Prefer primary sources using the `search` tool. Cross-check load-bearing claims in two sources. Note versions and dates. When sources disagree, do not pick a side silently; carry the disagreement into the output.
 
 ## Phase 2: Explain
 

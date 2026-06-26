@@ -166,14 +166,14 @@ export function truncateSnippet(text: string): string {
 
 export function getSemanticSearchFallbackMessage(progress: RagIndexProgress): string {
 	if (progress.status === "indexing") {
-		return `Semantic index is still building: ${progress.indexedFiles} / ${progress.totalFiles} notes indexed. Use search, list, or view for exact lookup while indexing continues.`;
+		return `Search index is still building: ${progress.indexedFiles} / ${progress.totalFiles} notes indexed. Use list or view for exact lookup while indexing continues.`;
 	}
 
 	if (progress.status === "error") {
-		return `Semantic index is unavailable due to an indexing error: ${progress.lastError ?? "unknown error"}. Use search, list, or view as fallback.`;
+		return `Search is unavailable due to an indexing error: ${progress.lastError ?? "unknown error"}. Use list or view as fallback.`;
 	}
 
-	return "No semantic index results found. The index may be empty or unavailable. Use search, list, or view as fallback.";
+	return "No search results found. The index may be empty or unavailable. Use list or view as fallback.";
 }
 
 export function getViewOffset(line: number | undefined, surrounding: number | undefined, offset: number | undefined): number {
