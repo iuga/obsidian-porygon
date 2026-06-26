@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { App } from "obsidian";
 import { z } from "zod";
-import { DEFAULT_SEMANTIC_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "../../rag";
+import { DEFAULT_SEARCH_LIMIT, RagIndexProgress, RagSemanticSearchService } from "../../rag";
 import {
 	buildSemanticWikilink,
 	getSemanticSearchFallbackMessage,
@@ -11,7 +11,7 @@ import {
 
 export function createSearchTool(app: App, semanticSearch: RagSemanticSearchService, getProgress: () => RagIndexProgress) {
 	return tool(
-		async ({ query, limit = DEFAULT_SEMANTIC_SEARCH_LIMIT }: { query: string; limit?: number }): Promise<string> => {
+		async ({ query, limit = DEFAULT_SEARCH_LIMIT }: { query: string; limit?: number }): Promise<string> => {
 			if (!semanticSearch.isConfigured()) {
 				return JSON.stringify({
 					results: [],
@@ -41,7 +41,7 @@ export function createSearchTool(app: App, semanticSearch: RagSemanticSearchServ
 			schema: z.object({
 				intent: intentSchema,
 				query: z.string().describe("What to find: exact words, a filename, or a natural-language description of the vault information you need."),
-				limit: z.number().int().min(1).max(20).optional().default(DEFAULT_SEMANTIC_SEARCH_LIMIT).describe(`Maximum number of matching chunks to return. Defaults to ${DEFAULT_SEMANTIC_SEARCH_LIMIT}.`),
+				limit: z.number().int().min(1).max(20).optional().default(DEFAULT_SEARCH_LIMIT).describe(`Maximum number of matching chunks to return. Defaults to ${DEFAULT_SEARCH_LIMIT}.`),
 			}),
 		}
 	);

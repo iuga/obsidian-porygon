@@ -5,7 +5,7 @@ import { PorygonPluginSettings } from "../settings/settings";
 import { arrayBufferToFloat32Array, RagIndexedDbStore } from "./indexeddb-store";
 import { RagChunkRecord, RagSemanticSearchOptions, RagSemanticSearchResult, RagVectorRecord } from "./types";
 
-export const DEFAULT_SEMANTIC_SEARCH_LIMIT = 8;
+export const DEFAULT_SEARCH_LIMIT = 8;
 
 // Minimum cosine similarity for a chunk to enter the vector candidate set
 // (Orama defaults to 0.8, which silently drops semantically-relevant chunks).
@@ -51,7 +51,7 @@ export class RagSemanticSearchService {
 
 	async search(options: RagSemanticSearchOptions): Promise<RagSemanticSearchResult[]> {
 		const query = options.query.trim();
-		const limit = Math.max(1, options.limit ?? DEFAULT_SEMANTIC_SEARCH_LIMIT);
+		const limit = Math.max(1, options.limit ?? DEFAULT_SEARCH_LIMIT);
 		if (!query || !this.isConfigured()) {
 			console.debug("[Porygon RAG] search skipped", {
 				query,
