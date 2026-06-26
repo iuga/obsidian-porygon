@@ -126,6 +126,7 @@ export class RagSemanticSearchService {
 	}
 
 	private async buildIndex(embeddingModel: string, mutationVersion: number): Promise<CachedIndex | null> {
+		const startedAt = performance.now();
 		const [chunks, vectors] = await Promise.all([
 			this.store.getChunksForEmbeddingModel(embeddingModel),
 			this.store.getVectorsForEmbeddingModel(embeddingModel),
@@ -153,6 +154,7 @@ export class RagSemanticSearchService {
 			mutationVersion,
 			documents: documents.length,
 			dimensions,
+			buildMs: Math.round(performance.now() - startedAt),
 		});
 		return { embeddingModel, mutationVersion, db };
 	}
