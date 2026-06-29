@@ -105,9 +105,10 @@ async function renderFileWidget(containerEl: HTMLElement, descriptor: WidgetDesc
  * the whole callout becomes a clickable card that opens the source file
  * (e.g. variant="quote" with an href is a quote pulled from a note); when
  * absent it is a static highlight (e.g. variant="quote" alone is a quote
- * with no source). A blank body degrades to nothing.
+ * with no source) whose body is rendered as markdown so wikilinks and
+ * other inline markup stay clickable. A blank body degrades to nothing.
  */
-function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescriptor, ctx: WidgetContext): void {
+async function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescriptor, ctx: WidgetContext): Promise<void> {
 	const text = (descriptor.body ?? "").trim();
 	if (!text) {
 		return;
@@ -129,13 +130,18 @@ function renderCalloutWidget(containerEl: HTMLElement, descriptor: WidgetDescrip
 
 	const iconEl = cardEl.createSpan({ cls: "porygon-widget-callout-icon" });
 	setIcon(iconEl, icon);
-	cardEl.createSpan({ cls: "porygon-widget-callout-text", text });
 
-	if (!href) {
+	const textEl = cardEl.createSpan({ cls: "porygon-widget-callout-text" });
+	if (href) {
+		// The card itself opens the source, so the body stays plain text:
+		// rendering markdown here would nest anchors inside the card's <a>.
+		textEl.setText(text);
+		bindOpenLink(cardEl, href, ctx);
 		return;
 	}
 
-	bindOpenLink(cardEl, href, ctx);
+	textEl.addClass("is-markdown");
+	await MarkdownRenderer.render(ctx.app, wikifyNoteLinks(text), textEl, "/", ctx.component);
 }
 
 /**
