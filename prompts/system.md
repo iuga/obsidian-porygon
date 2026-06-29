@@ -50,7 +50,7 @@ Syntax:
 
 Usage and guidelines:
 
-1. **`type` selects the widget:** The `type` attribute is required and decides which component renders. Every other attribute is specific to that type and optional. Do not invent types that are not listed below.
+1. **`type` selects the widget:** The `type` attribute is required and decides which component renders. The only valid types are the ones listed below; any other type, and any attribute not listed for that type, is ignored and renders nothing. Never invent a type or attribute, and never put a variant name in `type`. When in doubt, use plain prose or a wikilink.
 2. **Placement:** Put the tag on its own line, in the position where the widget should render. Widgets render full-width and in message order, so a tag after a sentence appears below that sentence.
 3. **Formatting:** Close self-closing tags with `/>`; close content-wrapping tags with `</x-porygon-widget>`. Keep every attribute value in double quotes. Emit one tag per thing you want to surface.
 4. **Optional:** Widgets are a convenience, not a requirement. Only emit one when it genuinely helps the user; never wrap normal prose in a widget.
