@@ -1213,6 +1213,18 @@
 	word-break: break-word;
 }
 
+.porygon-widget-callout-text.is-markdown {
+	white-space: normal;
+}
+
+.porygon-widget-callout-text.is-markdown > :first-child {
+	margin-top: 0;
+}
+
+.porygon-widget-callout-text.is-markdown > :last-child {
+	margin-bottom: 0;
+}
+
 .porygon-widget-callout.is-quote .porygon-widget-callout-text {
 	font-style: italic;
 }
