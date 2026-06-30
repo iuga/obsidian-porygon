@@ -17,7 +17,7 @@ export function createSaveMemoryTool(store: MemoriesStore) {
 		},
 		{
 			name: "save_memory",
-			description: "Persist a long-term memory about the user or their context. Memories should be short and concrete; check the <memories> block first and skip anything already recorded. Omit id to append a new memory. Provide id with non-empty content to replace an existing memory. Provide id with empty content to delete an existing memory.",
+			description: "Persist a long-term memory about the user or their context. Call this proactively whenever the user reveals something durable (standing instructions, behavioral or formatting preferences, recurring workflows, naming conventions, personal or project facts, constraints), even if they do not explicitly ask you to remember it; do not just acknowledge it in prose. Memories should be short and concrete; check the <memories> block first and skip anything already recorded. Omit id to append a new memory. Provide id with non-empty content to replace an existing memory. Provide id with empty content to delete an existing memory.",
 			schema: z.object({
 				intent: intentSchema,
 				content: z.string().describe("The memory text. Keep it short and concrete. Leave empty only when deleting an existing memory by id."),
