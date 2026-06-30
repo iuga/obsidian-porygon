@@ -1165,10 +1165,15 @@ export class PorygonView extends ItemView {
 
 	private async handleSessionsCommand(): Promise<void> {
 		if (!this.composerEl) {
+			console.error("Unable to open Porygon resume popover: composer is not ready");
 			return;
 		}
 
-		await this.renderSessionPopover(this.composerEl);
+		try {
+			await this.renderSessionPopover(this.composerEl);
+		} catch (error) {
+			console.error("Unable to open Porygon resume popover", error);
+		}
 	}
 
 	private async renderSessionPopover(composerEl: HTMLElement): Promise<void> {
