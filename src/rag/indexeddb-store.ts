@@ -238,7 +238,7 @@ export class RagIndexedDbStore {
 }
 
 export function float32ArrayToArrayBuffer(vector: Float32Array): ArrayBuffer {
-	return vector.buffer.slice(vector.byteOffset, vector.byteOffset + vector.byteLength);
+	return vector.buffer.slice(vector.byteOffset, vector.byteOffset + vector.byteLength) as ArrayBuffer;
 }
 
 export function arrayBufferToFloat32Array(vector: ArrayBuffer): Float32Array {

@@ -10,11 +10,11 @@ import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
 
 export default class PorygonPlugin extends Plugin {
-	settings: PorygonPluginSettings;
-	ragIndexer: RagIndexer;
-	ragSemanticSearch: RagSemanticSearchService;
-	skills: SkillsService;
-	private ragStore: RagIndexedDbStore;
+	settings!: PorygonPluginSettings;
+	ragIndexer!: RagIndexer;
+	ragSemanticSearch!: RagSemanticSearchService;
+	skills!: SkillsService;
+	private ragStore!: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
 		// LangGraph's `interrupt()` resumes the right async context only when
