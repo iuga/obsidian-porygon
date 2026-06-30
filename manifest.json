@@ -1,7 +1,7 @@
 {
 	"id": "porygon",
 	"name": "Porygon",
-	"version": "0.20.0",
+	"version": "0.20.1",
 	"minAppVersion": "1.8.7",
 	"description": "Turn your notes into a conversation.",
 	"author": "Esteban Del Boca",
