@@ -85,7 +85,16 @@ export class PopoverHost {
 		const handle: PopoverHandle = { kind, close };
 		this.current = handle;
 
-		config = build({ rootEl, requestClose: close }) ?? {};
+		try {
+			config = build({ rootEl, requestClose: close }) ?? {};
+		} catch (error) {
+			console.error(`Unable to open Porygon "${kind}" popover`, error);
+			rootEl.remove();
+			if (this.current === handle) {
+				this.current = null;
+			}
+			return handle;
+		}
 
 		keydownHandler = (event: KeyboardEvent) => {
 			if (config.onKeydown) {
