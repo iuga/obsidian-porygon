@@ -8,7 +8,7 @@ import type { PorygonPluginSettings } from "../settings/settings";
 import { MemoriesStore } from "./memories";
 import { buildSystemPrompt } from "./prompt";
 import { SkillsService } from "./skills";
-import { consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, toLangChainMessage, ToolIntentTracker } from "./streaming";
+import { AgentLike, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, toLangChainMessage, ToolIntentTracker } from "./streaming";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
@@ -110,7 +110,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		const stream = await activeAgent.stream(nextInput, config);
 		await consumeAgentStream(stream, tracker, acc, handlers);
 
-		const askPayloads = await getPendingAskUserPayloads(activeAgent, config);
+		const askPayloads = await getPendingAskUserPayloads(activeAgent as unknown as AgentLike, config);
 		if (askPayloads.length === 0) {
 			return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents };
 		}
