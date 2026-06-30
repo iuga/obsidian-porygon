@@ -104,7 +104,6 @@ export class ToolIntentTracker {
 // Callers loop this across interrupt/resume cycles; `tracker` carries the
 // partial-chunk state across passes so split tool-call args still reconcile.
 export async function consumeAgentStream(
-	// eslint-disable-next-line no-undef -- AsyncIterable is a built-in TS lib type, not a runtime browser global.
 	stream: AsyncIterable<unknown>,
 	tracker: ToolIntentTracker,
 	acc: StreamAccumulator,
