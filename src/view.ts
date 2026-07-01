@@ -196,6 +196,7 @@ export class PorygonView extends ItemView {
 	}
 
 	onClose(): Promise<void> {
+		this.stopActiveStream();
 		this.popoverHost.closeCurrent();
 		if (this.chatList) {
 			this.chatList.dispose();
@@ -737,6 +738,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private startNewChat(): void {
+		this.stopActiveStream();
 		if (this.currentSessionId) {
 			void clearAgentMemory(this.currentSessionId);
 		}
@@ -1588,7 +1590,12 @@ export class PorygonView extends ItemView {
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
 		this.streamingMessage = porygonMessage;
-		this.streamAbortController = new AbortController();
+		const controller = new AbortController();
+		this.streamAbortController = controller;
+		// A session switch mid-turn calls stopActiveStream(), which swaps in a
+		// new controller (or null). Guard the post-await tail so a superseded
+		// turn never finalizes / autosaves into the freshly loaded session.
+		const isCurrentTurn = () => this.streamAbortController === controller;
 		this.updateSendButtonState();
 		// One reconcile to mount the new user / file / porygon rows. All
 		// further per-delta work goes through ChatList.notifyStreamingDelta
@@ -1659,7 +1666,7 @@ export class PorygonView extends ItemView {
 						await this.plugin.saveSettings();
 					},
 				},
-				signal: this.streamAbortController.signal,
+				signal: controller.signal,
 			}, {
 				onToolIntent: (toolIntent) => {
 					clearPendingAnswerPlaceholder();
@@ -1687,6 +1694,12 @@ export class PorygonView extends ItemView {
 				onAskUser: (payload) => this.handleAskUser(payload),
 			});
 
+			// A mid-turn session switch supersedes this turn. Bail before
+			// touching isSessionMemoryPrimed / messages / autosave so we don't
+			// finalize the old reply into the freshly loaded session.
+			if (!isCurrentTurn()) {
+				return;
+			}
 			this.isSessionMemoryPrimed = true;
 
 			if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
@@ -1698,7 +1711,12 @@ export class PorygonView extends ItemView {
 			this.chatList?.notifyChanged(porygonMessage);
 			await this.autosaveSession();
 		} catch (error) {
-			if (this.streamAbortController?.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+			// Superseded by a session switch: the new session already reset
+			// streaming state, so drop this turn's tail entirely.
+			if (!isCurrentTurn()) {
+				return;
+			}
+			if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
 				await this.handleStreamCancelled(porygonMessage, hasStartedStreamingContent, thinkingStartedAt);
 			} else {
 				await this.finalizeStreaming(porygonMessage);
@@ -1708,9 +1726,11 @@ export class PorygonView extends ItemView {
 				await this.autosaveSession();
 			}
 		} finally {
-			this.isStreaming = false;
-			this.streamAbortController = null;
-			this.updateSendButtonState();
+			if (isCurrentTurn()) {
+				this.isStreaming = false;
+				this.streamAbortController = null;
+				this.updateSendButtonState();
+			}
 		}
 	}
 
@@ -1727,6 +1747,30 @@ export class PorygonView extends ItemView {
 
 	private cancelStreaming(): void {
 		this.streamAbortController?.abort();
+	}
+
+	// Hard-stop the in-flight turn before switching sessions. Aborts the
+	// agent, unblocks a parked ask-user prompt so its promise settles, and
+	// resets streaming state synchronously so the loading indicator / Stop
+	// button clear immediately. The superseded turn's async tail is neutered
+	// by the isCurrentTurn() guard in sendCurrentMessage().
+	private stopActiveStream(): void {
+		if (!this.isStreaming) {
+			return;
+		}
+		this.streamAbortController?.abort();
+		if (this.askResolve) {
+			const resolve = this.askResolve;
+			this.askResolve = null;
+			resolve("");
+		}
+		if (this.popoverHost.isOpen(POPOVER_ASK)) {
+			this.popoverHost.closeCurrent();
+		}
+		this.isStreaming = false;
+		this.streamAbortController = null;
+		this.streamingMessage = null;
+		this.updateSendButtonState();
 	}
 
 	// Connecting-phase cancel (no deltas yet): drop the placeholder bubble
@@ -1985,6 +2029,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private async loadSession(file: TFile): Promise<void> {
+		this.stopActiveStream();
 		try {
 			const content = await this.plugin.app.vault.cachedRead(file);
 			const parsed = this.parseSession(content);
