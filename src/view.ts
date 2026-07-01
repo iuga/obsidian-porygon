@@ -153,6 +153,8 @@ export class PorygonView extends ItemView {
 	private sessionResults: SessionSummary[] = [];
 	private allSessionSummaries: SessionSummary[] = [];
 	private selectedSessionIndex = 0;
+	private isLoadingSessions = false;
+	private sessionLoadToken = 0;
 	private askResolve: ((reply: string) => void) | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
@@ -1179,7 +1181,11 @@ export class PorygonView extends ItemView {
 	}
 
 	private async renderSessionPopover(composerEl: HTMLElement): Promise<void> {
-		this.allSessionSummaries = await this.getSessionSummaries();
+		const loadToken = ++this.sessionLoadToken;
+		this.allSessionSummaries = [];
+		this.sessionResults = [];
+		this.selectedSessionIndex = 0;
+
 		this.popoverHost.open(POPOVER_SESSION, composerEl, "porygon-session-popover", ({ rootEl, requestClose }) => {
 			const panel = rootEl.createDiv({ cls: "porygon-session-panel" });
 			const filterInput = panel.createEl("input", {
@@ -1202,25 +1208,81 @@ export class PorygonView extends ItemView {
 					this.sessionResults = [];
 					this.allSessionSummaries = [];
 					this.selectedSessionIndex = 0;
+					this.setSessionsLoading(false);
 				},
 			};
 		});
+
+		// Set loading after open(): opening closes any prior popover, whose
+		// onClose would otherwise clear the flag we just set.
+		this.setSessionsLoading(true);
+		this.refreshSessionResults();
+		await this.streamSessionSummaries(loadToken);
+	}
+
+	// Opens all reads at once (fast) but appends results in newest→older
+	// order so the list visibly fills top-down without ever showing an
+	// older session ahead of a newer one.
+	private async streamSessionSummaries(loadToken: number): Promise<void> {
+		const files = this.getSessionFiles();
+		if (files.length === 0) {
+			this.setSessionsLoading(false);
+			this.refreshSessionResults();
+			return;
+		}
+
+		const pending = files.map((file) => this.getSessionSummary(file));
+		try {
+			for (const summaryPromise of pending) {
+				const summary = await summaryPromise;
+				if (!this.isCurrentSessionLoad(loadToken)) {
+					return;
+				}
+				this.allSessionSummaries.push(summary);
+				this.refreshSessionResults();
+			}
+		} finally {
+			if (this.isCurrentSessionLoad(loadToken)) {
+				this.setSessionsLoading(false);
+				this.refreshSessionResults();
+			}
+		}
+	}
+
+	private isCurrentSessionLoad(loadToken: number): boolean {
+		return loadToken === this.sessionLoadToken && this.popoverHost.isOpen(POPOVER_SESSION);
+	}
+
+	private setSessionsLoading(isLoading: boolean): void {
+		this.isLoadingSessions = isLoading;
+		this.updateStreamingIndicator();
+	}
+
+	private refreshSessionResults(): void {
+		if (!this.popoverHost.isOpen(POPOVER_SESSION)) {
+			return;
+		}
+		const sessionsEl = this.contentEl.querySelector<HTMLElement>(".porygon-session-results");
+		if (!sessionsEl) {
+			return;
+		}
+		const filterInput = this.contentEl.querySelector<HTMLInputElement>(".porygon-session-filter");
+		this.renderSessionResults(sessionsEl, filterInput?.value ?? "");
 	}
 
 	private getSessionsFolder(): string {
 		return normalizePath(`${this.plugin.settings.porygonFolder}/${PORYGON_SESSIONS_SUBFOLDER}`);
 	}
 
-	private async getSessionSummaries(): Promise<SessionSummary[]> {
+	private getSessionFiles(): TFile[] {
 		const folder = this.plugin.app.vault.getAbstractFileByPath(this.getSessionsFolder());
 		if (!(folder instanceof TFolder)) {
 			return [];
 		}
 
-		const files = folder.children
+		return folder.children
 			.filter((child): child is TFile => child instanceof TFile && child.extension === "md")
 			.sort((first, second) => second.stat.mtime - first.stat.mtime);
-		return Promise.all(files.map((file) => this.getSessionSummary(file)));
 	}
 
 	private async getSessionSummary(file: TFile): Promise<SessionSummary> {
@@ -1253,7 +1315,8 @@ export class PorygonView extends ItemView {
 		this.selectedSessionIndex = Math.min(this.selectedSessionIndex, Math.max(results.length - 1, 0));
 
 		if (results.length === 0) {
-			containerEl.createDiv({ cls: "porygon-session-empty", text: "No sessions found" });
+			const emptyText = this.isLoadingSessions ? "Loading sessions..." : "No sessions found";
+			containerEl.createDiv({ cls: "porygon-session-empty", text: emptyText });
 			return;
 		}
 
@@ -1542,7 +1605,7 @@ export class PorygonView extends ItemView {
 	}
 
 	private updateStreamingIndicator(): void {
-		const isActive = this.isStreaming && this.isOnboardingComplete();
+		const isActive = (this.isStreaming && this.isOnboardingComplete()) || this.isLoadingSessions;
 		this.contentEl.toggleClass("is-loading", isActive);
 	}
 
