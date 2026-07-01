@@ -1,6 +1,6 @@
 ---
 name: summarizer
-description: Summarize a text note or markdown file into one of three formats (one-liner, one-paragraph, or extended). Use whenever the user asks to summarize, condense, recap, "give me the gist of", or "tl;dr" a note, even if they don't say the word "summary". Defaults to one-paragraph. Preserves every critical fact, never invents content, avoids buzzwords.
+description: Summarize a text note or markdown file into one of three formats (one-liner, one-paragraph, or extended). Use whenever the user asks to summarize, condense, recap, "give me the gist of", or "tl;dr" a note, even if they don't say the word "summary". Preserves every critical fact, never invents content, avoids buzzwords.
 ---
 
 # Note Summarizer
