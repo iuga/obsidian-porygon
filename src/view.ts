@@ -155,6 +155,7 @@ export class PorygonView extends ItemView {
 	private selectedSessionIndex = 0;
 	private isLoadingSessions = false;
 	private sessionLoadToken = 0;
+	private sessionRefreshHandle: number | null = null;
 	private askResolve: ((reply: string) => void) | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
@@ -1205,6 +1206,7 @@ export class PorygonView extends ItemView {
 			return {
 				onKeydown: (event) => this.handleSessionPopoverKeydown(event, sessionsEl, filterInput.value, requestClose),
 				onClose: () => {
+					this.cancelSessionRefresh();
 					this.sessionResults = [];
 					this.allSessionSummaries = [];
 					this.selectedSessionIndex = 0;
@@ -1239,12 +1241,12 @@ export class PorygonView extends ItemView {
 					return;
 				}
 				this.allSessionSummaries.push(summary);
-				this.refreshSessionResults();
+				this.scheduleSessionRefresh();
 			}
 		} finally {
 			if (this.isCurrentSessionLoad(loadToken)) {
 				this.setSessionsLoading(false);
-				this.refreshSessionResults();
+				this.flushSessionRefresh();
 			}
 		}
 	}
@@ -1268,6 +1270,33 @@ export class PorygonView extends ItemView {
 		}
 		const filterInput = this.contentEl.querySelector<HTMLInputElement>(".porygon-session-filter");
 		this.renderSessionResults(sessionsEl, filterInput?.value ?? "");
+	}
+
+	// Coalesce the per-summary refreshes into one rebuild per frame. Streamed
+	// summaries resolve as microtasks that all drain before the browser
+	// paints, so a rebuild per arrival is wasted work; rAF collapses them.
+	private scheduleSessionRefresh(): void {
+		if (this.sessionRefreshHandle !== null) {
+			return;
+		}
+		this.sessionRefreshHandle = window.requestAnimationFrame(() => {
+			this.sessionRefreshHandle = null;
+			this.refreshSessionResults();
+		});
+	}
+
+	// Render immediately, dropping any frame queued by scheduleSessionRefresh
+	// so the final list can't be clobbered by a stale pending rebuild.
+	private flushSessionRefresh(): void {
+		this.cancelSessionRefresh();
+		this.refreshSessionResults();
+	}
+
+	private cancelSessionRefresh(): void {
+		if (this.sessionRefreshHandle !== null) {
+			window.cancelAnimationFrame(this.sessionRefreshHandle);
+			this.sessionRefreshHandle = null;
+		}
 	}
 
 	private getSessionsFolder(): string {
