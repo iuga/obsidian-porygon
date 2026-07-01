@@ -11,6 +11,8 @@ export interface ChatModelConfig {
 export interface ModelDetails {
 	// Model architecture/family, e.g. "gemma3", "llama". Null when unknown.
 	family: string | null;
+	// Maximum context window in tokens, e.g. 131072. Null when unknown.
+	contextLength: number | null;
 }
 
 export interface ModelInfo {

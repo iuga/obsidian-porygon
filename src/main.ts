@@ -8,12 +8,22 @@ import { PorygonSettingTab } from "./settings/settings-tab";
 import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
+import { getActiveProvider } from "./providers";
 
 export default class PorygonPlugin extends Plugin {
 	settings!: PorygonPluginSettings;
 	ragIndexer!: RagIndexer;
 	ragSemanticSearch!: RagSemanticSearchService;
 	skills!: SkillsService;
+	// Active chat model's max context window (tokens), or null when unknown.
+	// The context meter's denominator. Resolved only at two moments — plugin
+	// load and chat-model/host change — since it's a fixed property of the
+	// model on a given host.
+	chatModelContextLength: number | null = null;
+	// Signature ("host|model") the current context length was resolved for, so
+	// we re-query only when either changes. A bare model name isn't enough: the
+	// same name can point to different models across hosts.
+	private chatModelContextLengthFor: string | null = null;
 	private ragStore!: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
@@ -50,6 +60,9 @@ export default class PorygonPlugin extends Plugin {
 				console.error("[Porygon Skills] failed to initialize", error);
 			});
 			void this.ragIndexer.reconcile();
+			// Resolve the chat model's context window once on load; refreshed
+			// again only when the model changes (see saveSettings).
+			void this.refreshChatModelContextLength();
 		});
 	}
 
@@ -92,6 +105,51 @@ export default class PorygonPlugin extends Plugin {
 		// Settings may have changed host/model/thinking effort; drop the cached agent
 		// so the next send rebuilds it with the new config.
 		resetAgent();
+		// The context window is a property of the chat model on its host, so
+		// re-resolve it only when either changes. Otherwise just refresh open
+		// views so toggles like the token-stats switch take effect immediately.
+		if (this.chatModelContextLengthFor !== this.chatModelSignature()) {
+			void this.refreshChatModelContextLength();
+		} else {
+			this.notifyOpenViewsSettingsChanged();
+		}
+	}
+
+	// Resolves the active chat model's max context window and notifies any
+	// open view so the meter's denominator updates. Failures (Ollama down,
+	// model pulled) leave the window unknown, which hides the meter rather
+	// than surfacing an error.
+	async refreshChatModelContextLength(): Promise<void> {
+		const model = this.settings.ollamaChatModel;
+		this.chatModelContextLengthFor = this.chatModelSignature();
+		if (!model) {
+			this.chatModelContextLength = null;
+			this.notifyOpenViewsSettingsChanged();
+			return;
+		}
+
+		try {
+			const provider = getActiveProvider(this.settings);
+			const info = await provider.showModel(this.settings, model);
+			this.chatModelContextLength = info?.details.contextLength ?? null;
+		} catch (error) {
+			console.error("Unable to resolve Porygon chat model context length", error);
+			this.chatModelContextLength = null;
+		}
+		this.notifyOpenViewsSettingsChanged();
+	}
+
+	private chatModelSignature(): string {
+		return `${this.settings.ollamaHost}|${this.settings.ollamaChatModel}`;
+	}
+
+	private notifyOpenViewsSettingsChanged(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(PORYGON_VIEW_TYPE)) {
+			const view = leaf.view;
+			if (view instanceof PorygonView) {
+				view.onContextSettingsChanged();
+			}
+		}
 	}
 
 	private registerSkillEvents(): void {

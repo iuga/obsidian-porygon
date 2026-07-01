@@ -9,6 +9,24 @@ interface OllamaListResponse {
 interface OllamaShowResponse {
 	capabilities?: string[];
 	details?: { family?: string };
+	model_info?: Record<string, unknown>;
+}
+
+// Ollama reports the context window under an architecture-scoped key, e.g.
+// "qwen3.context_length" or "llama.context_length". The architecture prefix
+// varies per model, so we scan for the first "*.context_length" entry.
+function extractContextLength(modelInfo: Record<string, unknown> | undefined): number | null {
+	if (!modelInfo) {
+		return null;
+	}
+
+	for (const [key, value] of Object.entries(modelInfo)) {
+		if (key.endsWith(".context_length") && typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+	}
+
+	return null;
 }
 
 async function ollamaGet<T>(host: string, path: string): Promise<T> {
@@ -89,7 +107,7 @@ export const ollamaProvider: ProviderDefinition = {
 		return {
 			model,
 			capabilities: json.capabilities ?? [],
-			details: { family: json.details?.family ?? null },
+			details: { family: json.details?.family ?? null, contextLength: extractContextLength(json.model_info) },
 		};
 	},
 };
