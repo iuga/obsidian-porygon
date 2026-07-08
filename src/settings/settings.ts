@@ -14,6 +14,7 @@ export interface PorygonPluginSettings {
 	thinkingEffort: ThinkingEffort;
 	showThinking: boolean;
 	showToolUsage: boolean;
+	showTokenStats: boolean;
 	yolo: boolean;
 	experience: ExperiencePreset;
 	ragIgnoredPaths: string;
@@ -33,6 +34,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	thinkingEffort: "medium",
 	showThinking: false,
 	showToolUsage: false,
+	showTokenStats: true,
 	yolo: false,
 	experience: "",
 	ragIgnoredPaths: "",
@@ -48,6 +50,7 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	thinkingEffort: "medium",
 	showThinking: true,
 	showToolUsage: false,
+	showTokenStats: true,
 	yolo: false,
 	experience: "verbose",
 	ragIgnoredPaths: "",

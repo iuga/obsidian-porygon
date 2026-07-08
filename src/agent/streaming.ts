@@ -47,6 +47,12 @@ export interface StreamHandlers {
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
 }
 
+export interface AgentTokenUsage {
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
+}
+
 export interface StreamAccumulator {
 	content: string;
 	thinking: string;
@@ -141,6 +147,21 @@ export async function consumeAgentStream(
 	}
 }
 
+// Extracts standard usage_metadata token counts from any message-shaped
+// value. ChatOllama merges Ollama's raw prompt_eval_count/eval_count into
+// usage_metadata on the final chunk, so this is the only field we need.
+function readUsage(message: unknown): AgentTokenUsage | null {
+	if (!isRecord(message) || !isRecord(message.usage_metadata)) {
+		return null;
+	}
+
+	const { input_tokens, output_tokens, total_tokens } = message.usage_metadata;
+	const inputTokens = typeof input_tokens === "number" ? input_tokens : 0;
+	const outputTokens = typeof output_tokens === "number" ? output_tokens : 0;
+	const totalTokens = typeof total_tokens === "number" ? total_tokens : inputTokens + outputTokens;
+	return totalTokens > 0 ? { inputTokens, outputTokens, totalTokens } : null;
+}
+
 function toToolIntent(id: string, name: string, args: Record<string, unknown>): AgentToolCallIntent | null {
 	const intent = args.intent;
 	return typeof intent === "string" && intent.trim() ? { id, name, intent: intent.trim() } : null;
@@ -175,12 +196,33 @@ export interface PendingAskUser {
 	payload: AskUserInterruptPayload;
 }
 
-export interface AgentLike {
-	getState: (config: unknown) => Promise<{ tasks?: Array<{ interrupts?: Array<{ id?: string; value?: unknown }> }> }>;
+export interface AgentState {
+	values?: { messages?: unknown[] };
+	tasks?: Array<{ interrupts?: Array<{ id?: string; value?: unknown }> }>;
 }
 
-export async function getPendingAskUserPayloads(agent: AgentLike, config: unknown): Promise<PendingAskUser[]> {
-	const state = await agent.getState(config);
+export interface AgentLike {
+	getState: (config: unknown) => Promise<AgentState>;
+}
+
+// The `messages` stream mode drops the final, empty-content chunk that
+// carries usage_metadata, so live streaming never sees token counts. The
+// checkpointed state, however, stores the fully-merged AI messages with
+// their usage_metadata intact. Read the most recent message with a usable
+// token count — that call's input_tokens already accounts for the whole
+// prompt + history + tool results, i.e. current context-window fill.
+export function readUsageFromState(state: AgentState): AgentTokenUsage | null {
+	const messages = Array.isArray(state.values?.messages) ? state.values.messages : [];
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const usage = readUsage(messages[i]);
+		if (usage) {
+			return usage;
+		}
+	}
+	return null;
+}
+
+export function getPendingAskUserPayloads(state: AgentState): PendingAskUser[] {
 	const pending: PendingAskUser[] = [];
 	for (const task of state.tasks ?? []) {
 		for (const interruptEntry of task.interrupts ?? []) {

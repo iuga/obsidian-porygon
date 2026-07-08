@@ -106,6 +106,16 @@ export class PorygonSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(chatItems)
+			.setName("Token usage stats")
+			.setDesc("Show context window usage (percentage and token counts) next to the send button.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.showTokenStats)
+				.onChange(async (value) => {
+					this.plugin.settings.showTokenStats = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(chatItems)
 			.setName("Yolo mode")
 			.setDesc("Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.")
 			.addToggle((toggle) => toggle

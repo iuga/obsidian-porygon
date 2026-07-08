@@ -487,6 +487,29 @@
 	justify-content: space-between;
 }
 
+.porygon-composer-right-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.porygon-context-usage {
+	display: none;
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	user-select: none;
+}
+
+.porygon-context-usage.is-visible {
+	display: inline-flex;
+}
+
+.porygon-context-usage.is-warning {
+	color: var(--color-red);
+}
+
 .porygon-composer-button.porygon-composer-button,
 .porygon-send-button.porygon-send-button {
 	display: flex;

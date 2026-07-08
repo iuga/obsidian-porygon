@@ -54,6 +54,9 @@ const POPOVER_SESSION = "session";
 const POPOVER_ASK = "ask";
 const POPOVER_FEEDBACK = "feedback";
 
+// Compact token formatting: 950 -> "950", 12_300 -> "12.3K", 300_000 -> "300K".
+const TOKEN_COUNT_FORMAT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
 interface FeedbackCallToAction {
 	label: string;
 	action: () => void;
@@ -143,6 +146,7 @@ export class PorygonView extends ItemView {
 	private composerEl: HTMLElement | null = null;
 	private composerInputEl: HTMLTextAreaElement | null = null;
 	private sendButtonEl: HTMLButtonElement | null = null;
+	private contextUsageEl: HTMLElement | null = null;
 	private mentionTagsEl: HTMLElement | null = null;
 	private popoverHost = new PopoverHost();
 	private mentionResults: MentionSearchResult[] = [];
@@ -171,6 +175,10 @@ export class PorygonView extends ItemView {
 	private streamingMessage: ChatMessage | null = null;
 	private streamAbortController: AbortController | null = null;
 	private chatList: ChatList | null = null;
+	// Latest usage_metadata total for the active session (null until the first
+	// reply). The context meter's numerator; the denominator (the model's max
+	// window) lives on the plugin and is resolved only on load / model change.
+	private contextTokensUsed: number | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PorygonPlugin) {
 		super(leaf);
@@ -336,12 +344,15 @@ export class PorygonView extends ItemView {
 		});
 		setIcon(mentionButton, "at-sign");
 		mentionButton.addEventListener("click", () => this.toggleMentionPopover(composer));
-		this.sendButtonEl = actionsRow.createEl("button", {
+		const rightActions = actionsRow.createDiv({ cls: "porygon-composer-right-actions" });
+		this.contextUsageEl = rightActions.createDiv({ cls: "porygon-context-usage" });
+		this.sendButtonEl = rightActions.createEl("button", {
 			cls: "porygon-send-button",
 			attr: { title: "Type a message...", "aria-label": "Type a message..." },
 		});
 		setIcon(this.sendButtonEl, "send-horizontal");
 		this.updateSendButtonState();
+		this.updateContextUsageLabel();
 
 		this.composerInputEl.addEventListener("input", () => this.handleComposerInput());
 		this.composerInputEl.addEventListener("keydown", (event) => {
@@ -748,6 +759,8 @@ export class PorygonView extends ItemView {
 		this.currentSessionId = null;
 		this.currentSessionTitle = "";
 		this.isSessionMemoryPrimed = false;
+		this.contextTokensUsed = null;
+		this.updateContextUsageLabel();
 		this.messages = [];
 		this.selectedMentions = [];
 		this.renderMentionTags();
@@ -1638,6 +1651,43 @@ export class PorygonView extends ItemView {
 		this.contentEl.toggleClass("is-loading", isActive);
 	}
 
+	// Renders the "x% - 12k / 300k" context meter beside the send button.
+	// Shown as soon as the model's context window is known (used defaults to
+	// 0 before the first reply); hidden when the user disabled token stats or
+	// the window is unknown, since a bare "12k" without a denominator is more
+	// confusing than helpful.
+	private updateContextUsageLabel(): void {
+		if (!this.contextUsageEl) {
+			return;
+		}
+
+		const total = this.plugin.chatModelContextLength;
+		if (!this.plugin.settings.showTokenStats || total === null || total <= 0) {
+			this.contextUsageEl.setText("");
+			this.contextUsageEl.toggleClass("is-visible", false);
+			this.contextUsageEl.removeAttribute("title");
+			this.contextUsageEl.removeAttribute("aria-label");
+			return;
+		}
+
+		const used = this.contextTokensUsed ?? 0;
+		const percent = Math.min(100, Math.round((used / total) * 100));
+		const label = `${percent}% - ${TOKEN_COUNT_FORMAT.format(used)} / ${TOKEN_COUNT_FORMAT.format(total)}`;
+		this.contextUsageEl.setText(label);
+		this.contextUsageEl.toggleClass("is-visible", true);
+		this.contextUsageEl.toggleClass("is-warning", percent >= 90);
+		const tooltip = `${used.toLocaleString()} of ${total.toLocaleString()} context tokens used (${percent}%)`;
+		this.contextUsageEl.title = tooltip;
+		this.contextUsageEl.ariaLabel = tooltip;
+	}
+
+	// Called by the plugin after the model's context window is re-resolved
+	// (on load or settings save), so the token meter reflects the latest
+	// state immediately.
+	onContextSettingsChanged(): void {
+		this.updateContextUsageLabel();
+	}
+
 	private getSendButtonTooltip(hasMessage: boolean): string {
 		if (this.isCheckingHealth) {
 			return "Checking Ollama...";
@@ -1782,6 +1832,13 @@ export class PorygonView extends ItemView {
 					// Routed to this row only. MessageRow materializes the
 					// thinking <details> on the first delta automatically.
 					this.chatList?.notifyStreamingDelta(porygonMessage, "thinking");
+				},
+				onUsage: (usage) => {
+					if (!isCurrentTurn()) {
+						return;
+					}
+					this.contextTokensUsed = usage.totalTokens;
+					this.updateContextUsageLabel();
 				},
 				onAskUser: (payload) => this.handleAskUser(payload),
 			});
@@ -2132,6 +2189,8 @@ export class PorygonView extends ItemView {
 			this.currentSessionId = nextSessionId;
 			this.currentSessionTitle = parsed.metadata.title ?? "";
 			this.isSessionMemoryPrimed = false;
+			this.contextTokensUsed = null;
+			this.updateContextUsageLabel();
 			this.messages = await this.rehydrateSessionMessages(parsed.messages, parsed.metadata.mentions ?? []);
 			this.selectedMentions = [];
 			if (this.composerInputEl) {
@@ -2286,6 +2345,12 @@ export class PorygonView extends ItemView {
 			this.isHealthy = await getActiveProvider(this.plugin.settings).checkHealth(this.plugin.settings);
 		} catch {
 			this.isHealthy = false;
+		}
+
+		// The context window may still be unresolved if Ollama was unreachable
+		// at plugin load; retry now that the provider responds again.
+		if (this.isHealthy && this.plugin.chatModelContextLength === null) {
+			void this.plugin.refreshChatModelContextLength();
 		}
 
 		this.updateSendButtonState();

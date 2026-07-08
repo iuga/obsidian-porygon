@@ -8,11 +8,12 @@ import type { PorygonPluginSettings } from "../settings/settings";
 import { MemoriesStore } from "./memories";
 import { buildSystemPrompt } from "./prompt";
 import { SkillsService } from "./skills";
-import { AgentLike, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, toLangChainMessage, ToolIntentTracker } from "./streaming";
+import { AgentLike, AgentTokenUsage, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, readUsageFromState, toLangChainMessage, ToolIntentTracker } from "./streaming";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
 export type { AskUserInterruptPayload } from "./tools";
+export type { AgentTokenUsage } from "./streaming";
 
 export type AgentChatRole = "user" | "porygon" | "file";
 
@@ -74,6 +75,7 @@ export interface LocalAgentStreamHandlers {
 	onContentDelta?: (delta: string) => void;
 	onThinkingDelta?: (delta: string) => void;
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
+	onUsage?: (usage: AgentTokenUsage) => void;
 	onAskUser?: (payload: AskUserInterruptPayload) => Promise<string> | string;
 }
 
@@ -110,7 +112,18 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		const stream = await activeAgent.stream(nextInput, config);
 		await consumeAgentStream(stream, tracker, acc, handlers);
 
-		const askPayloads = await getPendingAskUserPayloads(activeAgent as unknown as AgentLike, config);
+		const state = await (activeAgent as unknown as AgentLike).getState(config);
+
+		// The live `messages` stream drops the usage-bearing final chunk, so
+		// pull token counts from the checkpointed state after each pass and
+		// surface the freshest reading (input_tokens already includes the
+		// full prompt + history + tool results = context-window fill).
+		const usage = readUsageFromState(state);
+		if (usage) {
+			handlers.onUsage?.(usage);
+		}
+
+		const askPayloads = getPendingAskUserPayloads(state);
 		if (askPayloads.length === 0) {
 			return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents };
 		}

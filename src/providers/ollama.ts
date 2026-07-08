@@ -9,6 +9,28 @@ interface OllamaListResponse {
 interface OllamaShowResponse {
 	capabilities?: string[];
 	details?: { family?: string };
+	// Raw modelfile parameter block, e.g. "num_ctx    8192\nstop    \"...\"".
+	parameters?: string;
+	model_info?: Record<string, unknown>;
+}
+
+// Effective context window: Ollama truncates prompts at the modelfile's
+// `num_ctx` when set, so prefer it over the architecture maximum reported
+// under an arch-scoped key ("qwen3.context_length", "llama.context_length",
+// ...). When neither is available the window is unknown.
+function extractContextLength(json: OllamaShowResponse): number | null {
+	const numCtx = json.parameters?.match(/^num_ctx\s+(\d+)\s*$/m);
+	if (numCtx) {
+		return Number(numCtx[1]);
+	}
+
+	for (const [key, value] of Object.entries(json.model_info ?? {})) {
+		if (key.endsWith(".context_length") && typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+	}
+
+	return null;
 }
 
 async function ollamaGet<T>(host: string, path: string): Promise<T> {
@@ -89,7 +111,7 @@ export const ollamaProvider: ProviderDefinition = {
 		return {
 			model,
 			capabilities: json.capabilities ?? [],
-			details: { family: json.details?.family ?? null },
+			details: { family: json.details?.family ?? null, contextLength: extractContextLength(json) },
 		};
 	},
 };
