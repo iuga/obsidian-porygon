@@ -15,15 +15,11 @@ export default class PorygonPlugin extends Plugin {
 	ragIndexer!: RagIndexer;
 	ragSemanticSearch!: RagSemanticSearchService;
 	skills!: SkillsService;
-	// Active chat model's max context window (tokens), or null when unknown.
-	// The context meter's denominator. Resolved only at two moments — plugin
-	// load and chat-model/host change — since it's a fixed property of the
-	// model on a given host.
+	// Active chat model's effective context window (tokens), or null when
+	// unknown. The context meter's denominator. Refreshed on load, on every
+	// settings save (cheap local /api/show), and when a health check passes
+	// while it's still unresolved (e.g. Ollama was down at plugin load).
 	chatModelContextLength: number | null = null;
-	// Signature ("host|model") the current context length was resolved for, so
-	// we re-query only when either changes. A bare model name isn't enough: the
-	// same name can point to different models across hosts.
-	private chatModelContextLengthFor: string | null = null;
 	private ragStore!: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
@@ -60,8 +56,6 @@ export default class PorygonPlugin extends Plugin {
 				console.error("[Porygon Skills] failed to initialize", error);
 			});
 			void this.ragIndexer.reconcile();
-			// Resolve the chat model's context window once on load; refreshed
-			// again only when the model changes (see saveSettings).
 			void this.refreshChatModelContextLength();
 		});
 	}
@@ -105,49 +99,28 @@ export default class PorygonPlugin extends Plugin {
 		// Settings may have changed host/model/thinking effort; drop the cached agent
 		// so the next send rebuilds it with the new config.
 		resetAgent();
-		// The context window is a property of the chat model on its host, so
-		// re-resolve it only when either changes. Otherwise just refresh open
-		// views so toggles like the token-stats switch take effect immediately.
-		if (this.chatModelContextLengthFor !== this.chatModelSignature()) {
-			void this.refreshChatModelContextLength();
-		} else {
-			this.notifyOpenViewsSettingsChanged();
-		}
+		// Re-resolve the context window (host/model may have changed) and refresh
+		// open views so toggles like the token-stats switch take effect
+		// immediately. One cheap local /api/show per user-initiated save.
+		void this.refreshChatModelContextLength();
 	}
 
-	// Resolves the active chat model's max context window and notifies any
-	// open view so the meter's denominator updates. Failures (Ollama down,
+	// Resolves the active chat model's effective context window and notifies
+	// any open view so the meter's denominator updates. Failures (Ollama down,
 	// model pulled) leave the window unknown, which hides the meter rather
-	// than surfacing an error.
+	// than surfacing an error; the view retries once health is restored.
 	async refreshChatModelContextLength(): Promise<void> {
 		const model = this.settings.ollamaChatModel;
-		this.chatModelContextLengthFor = this.chatModelSignature();
-		if (!model) {
-			this.chatModelContextLength = null;
-			this.notifyOpenViewsSettingsChanged();
-			return;
-		}
-
 		try {
-			const provider = getActiveProvider(this.settings);
-			const info = await provider.showModel(this.settings, model);
+			const info = model ? await getActiveProvider(this.settings).showModel(this.settings, model) : null;
 			this.chatModelContextLength = info?.details.contextLength ?? null;
 		} catch (error) {
 			console.error("Unable to resolve Porygon chat model context length", error);
 			this.chatModelContextLength = null;
 		}
-		this.notifyOpenViewsSettingsChanged();
-	}
-
-	private chatModelSignature(): string {
-		return `${this.settings.ollamaHost}|${this.settings.ollamaChatModel}`;
-	}
-
-	private notifyOpenViewsSettingsChanged(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(PORYGON_VIEW_TYPE)) {
-			const view = leaf.view;
-			if (view instanceof PorygonView) {
-				view.onContextSettingsChanged();
+			if (leaf.view instanceof PorygonView) {
+				leaf.view.onContextSettingsChanged();
 			}
 		}
 	}

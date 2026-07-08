@@ -54,6 +54,9 @@ const POPOVER_SESSION = "session";
 const POPOVER_ASK = "ask";
 const POPOVER_FEEDBACK = "feedback";
 
+// Compact token formatting: 950 -> "950", 12_300 -> "12.3K", 300_000 -> "300K".
+const TOKEN_COUNT_FORMAT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
 interface FeedbackCallToAction {
 	label: string;
 	action: () => void;
@@ -1660,7 +1663,7 @@ export class PorygonView extends ItemView {
 
 		const total = this.plugin.chatModelContextLength;
 		if (!this.plugin.settings.showTokenStats || total === null || total <= 0) {
-			this.contextUsageEl.empty();
+			this.contextUsageEl.setText("");
 			this.contextUsageEl.toggleClass("is-visible", false);
 			this.contextUsageEl.removeAttribute("title");
 			this.contextUsageEl.removeAttribute("aria-label");
@@ -1669,7 +1672,7 @@ export class PorygonView extends ItemView {
 
 		const used = this.contextTokensUsed ?? 0;
 		const percent = Math.min(100, Math.round((used / total) * 100));
-		const label = `${percent}% - ${this.formatTokenCount(used)} / ${this.formatTokenCount(total)}`;
+		const label = `${percent}% - ${TOKEN_COUNT_FORMAT.format(used)} / ${TOKEN_COUNT_FORMAT.format(total)}`;
 		this.contextUsageEl.setText(label);
 		this.contextUsageEl.toggleClass("is-visible", true);
 		this.contextUsageEl.toggleClass("is-warning", percent >= 90);
@@ -1678,20 +1681,9 @@ export class PorygonView extends ItemView {
 		this.contextUsageEl.ariaLabel = tooltip;
 	}
 
-	// Compact token formatting: 950 -> "950", 12_300 -> "12k", 300_000 -> "300k".
-	private formatTokenCount(count: number): string {
-		if (count < 1000) {
-			return `${count}`;
-		}
-
-		const thousands = count / 1000;
-		const rounded = thousands >= 100 || Number.isInteger(thousands) ? Math.round(thousands) : Math.round(thousands * 10) / 10;
-		return `${rounded}k`;
-	}
-
 	// Called by the plugin after the model's context window is re-resolved
-	// (on load or model change) or after a chat-experience setting changes,
-	// so the token meter reflects the latest state immediately.
+	// (on load or settings save), so the token meter reflects the latest
+	// state immediately.
 	onContextSettingsChanged(): void {
 		this.updateContextUsageLabel();
 	}
@@ -2353,6 +2345,12 @@ export class PorygonView extends ItemView {
 			this.isHealthy = await getActiveProvider(this.plugin.settings).checkHealth(this.plugin.settings);
 		} catch {
 			this.isHealthy = false;
+		}
+
+		// The context window may still be unresolved if Ollama was unreachable
+		// at plugin load; retry now that the provider responds again.
+		if (this.isHealthy && this.plugin.chatModelContextLength === null) {
+			void this.plugin.refreshChatModelContextLength();
 		}
 
 		this.updateSendButtonState();

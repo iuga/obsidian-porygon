@@ -69,7 +69,6 @@ export interface LocalAgentResponse {
 	content: string;
 	thinking: string;
 	toolIntents: AgentToolCallIntent[];
-	usage: AgentTokenUsage | null;
 }
 
 export interface LocalAgentStreamHandlers {
@@ -113,19 +112,20 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		const stream = await activeAgent.stream(nextInput, config);
 		await consumeAgentStream(stream, tracker, acc, handlers);
 
+		const state = await (activeAgent as unknown as AgentLike).getState(config);
+
 		// The live `messages` stream drops the usage-bearing final chunk, so
 		// pull token counts from the checkpointed state after each pass and
 		// surface the freshest reading (input_tokens already includes the
 		// full prompt + history + tool results = context-window fill).
-		const stateUsage = await readUsageFromState(activeAgent as unknown as AgentLike, config);
-		if (stateUsage) {
-			acc.usage = stateUsage;
-			handlers.onUsage?.(stateUsage);
+		const usage = readUsageFromState(state);
+		if (usage) {
+			handlers.onUsage?.(usage);
 		}
 
-		const askPayloads = await getPendingAskUserPayloads(activeAgent as unknown as AgentLike, config);
+		const askPayloads = getPendingAskUserPayloads(state);
 		if (askPayloads.length === 0) {
-			return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents, usage: acc.usage };
+			return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents };
 		}
 
 		if (!handlers.onAskUser) {
