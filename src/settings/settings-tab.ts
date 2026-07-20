@@ -169,7 +169,14 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const semanticGroup = containerEl.createDiv({ cls: "setting-group" });
 		const semanticItems = semanticGroup.createDiv({ cls: "setting-items" });
 
-		this.statusSetting = new Setting(semanticItems).setName("Index status");
+		this.statusSetting = new Setting(semanticItems)
+			.setName("Index status")
+			.addExtraButton((btn) => btn
+				.setIcon("refresh-cw")
+				.setTooltip("Reprocess index")
+				.onClick(() => {
+					void this.plugin.ragIndexer.reconcile();
+				}));
 		this.subscribeToIndexProgress();
 
 		const ignoredPathsSetting = new Setting(semanticItems)
