@@ -77,7 +77,7 @@ export class MessageRow {
 			component: deps.component,
 			openLink: deps.openLink,
 		};
-		this.el = activeDocument.createElement("div");
+		this.el = createDiv();
 		this.el.addClass("porygon-message-row", `is-${message.role}`);
 		this.buildSkeleton();
 		this.update(message, /*forceFull*/ true);
@@ -499,7 +499,7 @@ export class MessageRow {
 		const snapshot = message.content;
 		const run = (async () => {
 			try {
-				const staging = activeDocument.createElement("div");
+				const staging = createDiv();
 				await renderSegments(parseMessageContent(snapshot), staging, this.widgetContext);
 				if (this.contentEl !== target) return;
 				target.empty();
@@ -541,7 +541,7 @@ export class MessageRow {
 		if (snapshot === this.renderedThinking) return Promise.resolve();
 		const run = (async () => {
 			try {
-				const staging = activeDocument.createElement("div");
+				const staging = createDiv();
 				await MarkdownRenderer.render(this.deps.app, snapshot, staging, "/", this.deps.component);
 				if (this.thinkingContentEl !== target) return;
 				target.empty();

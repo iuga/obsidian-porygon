@@ -1,4 +1,5 @@
 import { debounce, Notice, PluginSettingTab, Setting } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 import PorygonPlugin from "../main";
 import { getActiveProvider } from "../providers";
 import { RagIndexProgress } from "../rag";
@@ -31,6 +32,119 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 	display(): void {
 		this.refresh();
+	}
+
+	// Declarative mirror of the settings rendered in display(). Obsidian 1.13+
+	// uses this to surface individual settings in the global settings search.
+	// The interactive UI still lives in display(); these definitions only feed
+	// search indexing and the built-in control binding.
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				type: "group",
+				heading: "Model Provider",
+				items: [
+					{
+						name: "Ollama host",
+						desc: "Host used by chat and embeddings.",
+						control: { key: "ollamaHost", type: "text", placeholder: ONBOARDING_DEFAULTS.ollamaHost },
+					},
+					{
+						name: "Chat model",
+						desc: "Model used for chat responses.",
+						control: { key: "ollamaChatModel", type: "text" },
+					},
+					{
+						name: "Thinking effort",
+						desc: "How much the model reasons before answering.",
+						aliases: ["reasoning"],
+						control: {
+							key: "thinkingEffort",
+							type: "dropdown",
+							options: { off: "Off", low: "Low", medium: "Medium", high: "High" },
+						},
+					},
+					{
+						name: "Embeddings model",
+						desc: "Model used for semantic search.",
+						control: { key: "ollamaEmbeddingModel", type: "text" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Chat Experience",
+				items: [
+					{
+						name: "Show thinking",
+						desc: "Display the reasoning stream in chat. Thinking effort still applies when hidden.",
+						control: { key: "showThinking", type: "toggle" },
+					},
+					{
+						name: "Tool usage reporting",
+						desc: "Show tool calls and their intent in chat history.",
+						control: { key: "showToolUsage", type: "toggle" },
+					},
+					{
+						name: "Token usage stats",
+						desc: "Show context window usage (percentage and token counts) next to the send button.",
+						control: { key: "showTokenStats", type: "toggle" },
+					},
+					{
+						name: "Yolo mode",
+						desc: "Auto-approve destructive actions (create folder, create/edit notes, rename/move) without asking. Leave off to be prompted before each change.",
+						control: { key: "yolo", type: "toggle" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Personalization",
+				items: [
+					{
+						name: "Personal prompt",
+						desc: "Tone and response preferences sent before each chat.",
+						control: { key: "personalPrompt", type: "textarea", rows: 14 },
+					},
+					{
+						name: "Memories",
+						desc: "Long-term memories the assistant has saved about you. Sorted by importance and recency.",
+						control: { key: "memories", type: "textarea", rows: 10 },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Semantic search",
+				items: [
+					{
+						name: "Ignored semantic index paths",
+						desc: "Vault-relative files or folders to exclude from the semantic index. Use one path or glob-like pattern per line.",
+						control: { key: "ragIgnoredPaths", type: "textarea", rows: 5 },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Advanced",
+				items: [
+					{
+						name: "Porygon folder",
+						desc: "Vault folder where the assistant stores its internal notes (sessions, skills).",
+						control: { key: "porygonFolder", type: "text", placeholder: DEFAULT_PORYGON_FOLDER },
+					},
+				],
+			},
+		];
+	}
+
+	getControlValue(key: string): unknown {
+		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+		await this.plugin.saveSettings();
 	}
 
 	private refresh(): void {
