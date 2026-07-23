@@ -1,5 +1,6 @@
 import { getFrontMatterInfo, MarkdownRenderer, normalizePath, setIcon, TFile } from "obsidian";
 import { wikifyNoteLinks } from "../../utils/links";
+import { renderMeetingWidget, renderMeetingsWidget } from "./meeting";
 import { ContentSegment, WidgetContext, WidgetDescriptor, WidgetRenderer } from "./types";
 
 // type -> renderer. New widget types register here without touching the
@@ -7,6 +8,8 @@ import { ContentSegment, WidgetContext, WidgetDescriptor, WidgetRenderer } from 
 const WIDGET_RENDERERS: Record<string, WidgetRenderer> = {
 	file: renderFileWidget,
 	callout: renderCalloutWidget,
+	meeting: renderMeetingWidget,
+	meetings: renderMeetingsWidget,
 };
 
 // Predefined callout variants. The agent only picks a semantic `variant`;

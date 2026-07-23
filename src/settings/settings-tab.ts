@@ -115,6 +115,17 @@ export class PorygonSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "AI Meeting Notes",
+				items: [
+					{
+						name: "Enable AI meeting notes",
+						desc: "Record, transcribe, and summarize meetings from the chat with the /meeting command.",
+						control: { key: "meetingNotesEnabled", type: "toggle" },
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Semantic search",
 				items: [
 					{
@@ -277,6 +288,21 @@ export class PorygonSettingTab extends PluginSettingTab {
 				});
 			});
 		memoriesSetting.settingEl.addClass("porygon-settings-prompt-setting");
+
+		this.renderSectionHeading(containerEl, "AI Meeting Notes", "Record, transcribe, and summarize meetings directly from the chat.");
+
+		const meetingGroup = containerEl.createDiv({ cls: "setting-group" });
+		const meetingItems = meetingGroup.createDiv({ cls: "setting-items" });
+
+		new Setting(meetingItems)
+			.setName("Enable AI meeting notes")
+			.setDesc("Adds the /meeting and /meetings commands to the chat. Meetings are stored in the porygon folder under \"meetings\".")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.meetingNotesEnabled)
+				.onChange(async (value) => {
+					this.plugin.settings.meetingNotesEnabled = value;
+					await this.plugin.saveSettings();
+				}));
 
 		this.renderSectionHeading(containerEl, "Semantic search", "Configure local semantic indexing.");
 

@@ -1251,3 +1251,240 @@
 .porygon-widget-callout.is-quote .porygon-widget-callout-text {
 	font-style: italic;
 }
+
+/* ── AI Meeting Notes widget ─────────────────────────────────────── */
+
+.porygon-widget-meeting,
+.porygon-widget-meetings {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-primary);
+	overflow: hidden;
+}
+
+.porygon-meeting-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.porygon-meeting-header-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+}
+
+.porygon-meeting-header-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.porygon-meeting-title {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.porygon-meeting-date {
+	color: var(--text-faint);
+	font-weight: 600;
+}
+
+.porygon-meeting-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-wrap: wrap;
+}
+
+.porygon-meeting-tabs {
+	display: flex;
+	gap: 4px;
+}
+
+.porygon-meeting-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.porygon-meeting-tab.is-active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.porygon-meeting-tab-icon {
+	display: inline-flex;
+}
+
+.porygon-meeting-tab-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.porygon-meeting-wave {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex: 1;
+	min-width: 60px;
+	height: 18px;
+	overflow: hidden;
+}
+
+.porygon-meeting-wave-bar {
+	width: 2px;
+	height: 3px;
+	border-radius: 1px;
+	background: var(--text-faint);
+}
+
+.porygon-widget-meeting.is-recording .porygon-meeting-wave-bar {
+	background: var(--text-muted);
+	animation: porygon-meeting-wave 1s ease-in-out infinite;
+}
+
+.porygon-widget-meeting.is-recording .porygon-meeting-wave-bar:nth-child(3n) {
+	animation-delay: 0.2s;
+}
+
+.porygon-widget-meeting.is-recording .porygon-meeting-wave-bar:nth-child(3n + 1) {
+	animation-delay: 0.45s;
+}
+
+@keyframes porygon-meeting-wave {
+	0%, 100% { height: 3px; }
+	50% { height: 14px; }
+}
+
+.porygon-meeting-timer {
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	font-size: var(--font-ui-small);
+}
+
+.porygon-meeting-controls {
+	display: flex;
+	gap: 6px;
+}
+
+.porygon-meeting-btn {
+	padding: 4px 10px;
+	border-radius: 6px;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.porygon-meeting-btn.is-start {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.porygon-meeting-btn.is-pause {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.porygon-meeting-btn.is-stop {
+	background: rgba(var(--color-red-rgb), 0.12);
+	color: var(--color-red);
+}
+
+.porygon-meeting-body {
+	padding: 12px 14px;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+.porygon-meeting-empty {
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+}
+
+.porygon-meeting-entry {
+	margin-bottom: 12px;
+}
+
+.porygon-meeting-entry-speaker {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.porygon-meeting-entry-icon {
+	display: inline-flex;
+}
+
+.porygon-meeting-entry-icon svg {
+	width: 13px;
+	height: 13px;
+}
+
+.porygon-meeting-entry-text {
+	border-left: 2px solid var(--background-modifier-border);
+	padding-left: 10px;
+	color: var(--text-normal);
+}
+
+.porygon-meeting-entry.is-user .porygon-meeting-entry-text {
+	border-left-color: var(--interactive-accent);
+}
+
+.porygon-meeting-footer {
+	padding: 8px 14px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.porygon-meeting-consent {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.porygon-meetings-list {
+	display: flex;
+	flex-direction: column;
+}
+
+.porygon-meetings-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 14px;
+	color: var(--text-normal);
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.porygon-meetings-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.porygon-meetings-item-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+}
+
+.porygon-meetings-item-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.porygon-widget-meetings .porygon-meeting-empty {
+	padding: 12px 14px;
+}

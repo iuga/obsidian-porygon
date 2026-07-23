@@ -21,6 +21,7 @@ export interface PorygonPluginSettings {
 	personalPrompt: string;
 	memories: string;
 	porygonFolder: string;
+	meetingNotesEnabled: boolean;
 }
 
 export const DEFAULT_PERSONAL_PROMPT = defaultPersonalPrompt.trim();
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 	memories: DEFAULT_MEMORIES,
 	porygonFolder: DEFAULT_PORYGON_FOLDER,
+	meetingNotesEnabled: false,
 };
 
 export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
@@ -57,6 +59,7 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	personalPrompt: DEFAULT_PERSONAL_PROMPT,
 	memories: DEFAULT_MEMORIES,
 	porygonFolder: DEFAULT_PORYGON_FOLDER,
+	meetingNotesEnabled: false,
 };
 
 export interface ExperiencePresetConfig {

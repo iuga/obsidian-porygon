@@ -36,7 +36,7 @@ interface MentionSearchResult {
 	files: TFile[];
 }
 
-type SlashCommandId = "new" | "resume";
+type SlashCommandId = "new" | "resume" | "meeting" | "meetings";
 
 interface SlashCommand {
 	id: SlashCommandId;
@@ -119,6 +119,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "new", label: "New session", syntax: "/new", description: "Start a new session.", icon: "circle-plus" },
 	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume/Load/Open a saved session.", icon: "messages-square" },
 ];
+
+// Only offered when the AI Meeting Notes feature flag is enabled.
+const MEETING_SLASH_COMMANDS: SlashCommand[] = [
+	{ id: "meeting", label: "Record meeting", syntax: "/meeting", description: "Record, transcribe, and summarize a meeting.", icon: "audio-lines" },
+	{ id: "meetings", label: "Meetings", syntax: "/meetings", description: "List recorded meetings and their summaries.", icon: "calendar-clock" },
+];
+
+const PORYGON_MEETINGS_SUBFOLDER = "meetings";
 
 const PORYGON_SESSIONS_SUBFOLDER = "sessions";
 const PORYGON_FRONTMATTER_DELIMITER = "---";
@@ -1155,12 +1163,15 @@ export class PorygonView extends ItemView {
 	}
 
 	private getSlashCommands(query: string): SlashCommand[] {
+		const commands = this.plugin.settings.meetingNotesEnabled
+			? [...SLASH_COMMANDS, ...MEETING_SLASH_COMMANDS]
+			: SLASH_COMMANDS;
 		const normalizedQuery = query.trim().toLowerCase();
 		if (!normalizedQuery) {
-			return SLASH_COMMANDS;
+			return commands;
 		}
 
-		return SLASH_COMMANDS.filter((command) =>
+		return commands.filter((command) =>
 			command.label.toLowerCase().includes(normalizedQuery) ||
 			command.syntax.toLowerCase().includes(normalizedQuery) ||
 			command.description.toLowerCase().includes(normalizedQuery)
@@ -1178,7 +1189,40 @@ export class PorygonView extends ItemView {
 
 		if (command.id === "resume") {
 			void this.handleSessionsCommand();
+			return;
 		}
+
+		if (command.id === "meeting") {
+			this.handleMeetingCommand();
+			return;
+		}
+
+		if (command.id === "meetings") {
+			this.handleMeetingsCommand();
+		}
+	}
+
+	// Injects a meeting recorder widget into the chat history. The widget is
+	// rendered through the standard widget pipeline, so it also survives
+	// session restore. Recording/summarization are mockups for now.
+	private handleMeetingCommand(): void {
+		const date = window.moment().format("MMM D, YYYY HH:mm");
+		this.messages.push({
+			role: "porygon",
+			content: `<x-porygon-widget type="meeting" title="Meeting" date="${date}" />`,
+			createdAt: new Date().toISOString(),
+		});
+		this.renderMessages();
+	}
+
+	private handleMeetingsCommand(): void {
+		const folder = normalizePath(`${this.plugin.settings.porygonFolder}/${PORYGON_MEETINGS_SUBFOLDER}`);
+		this.messages.push({
+			role: "porygon",
+			content: `<x-porygon-widget type="meetings" folder="${folder}" />`,
+			createdAt: new Date().toISOString(),
+		});
+		this.renderMessages();
 	}
 
 	private async handleSessionsCommand(): Promise<void> {
