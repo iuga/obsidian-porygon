@@ -24,13 +24,27 @@ export function createEditTool(app: App, getYolo: () => boolean) {
 							return `file already exists and is not empty: ${filename}`;
 						}
 
+						if (existingContent === newString) {
+							return "new content is the same as old content. No changes made.";
+						}
+
 						return await withApproval(
 							`Write to empty note \`${filename}\`?`,
 							`writing note: ${filename}`,
 							getYolo,
 							async () => {
-								await app.vault.modify(file, newString);
-								return stringifyEditMetadata(existingContent, newString);
+								let previousContent = existingContent;
+								await app.vault.process(file, (currentContent) => {
+									previousContent = currentContent;
+									if (currentContent.trim() !== "") {
+										return currentContent;
+									}
+									return newString;
+								});
+								if (previousContent.trim() !== "") {
+									return `file is no longer empty, no changes made: ${filename}`;
+								}
+								return stringifyEditMetadata(previousContent, newString);
 							},
 						);
 					}
@@ -85,11 +99,11 @@ export function createEditTool(app: App, getYolo: () => boolean) {
 		},
 		{
 			name: "edit",
-			description: "Edit a markdown note by exact find-and-replace; can also create a new note or delete content. For existing files, old_string is mandatory and must never be empty: use view first, then copy exact text including whitespace, indentation, blank lines, and line breaks. Empty old_string is allowed when creating a brand-new file or when writing content into an existing empty (or whitespace-only) file. When replace_all is false, old_string must uniquely identify one occurrence; include 3-5 lines of surrounding context before and after the change. Delete content by providing old_string and leaving new_string empty. If old_string is not found, view the file again and copy a larger exact block; never guess. Correct example: old_string='## Summary\\n\\nThe catalog supports locale-aware attributes.\\n\\n## Details' and new_string='## Summary\\n\\nThe catalog supports locale-aware attributes and recommendations.\\n\\n## Details'. Incorrect examples: old_string='## Summary' because it lacks context, or old_string with one blank line when the file has two. Exact whitespace matters. Returns a JSON string with additions, removals, old_content, and new_content.",
+			description: "Edit a markdown note by exact find-and-replace; can also create a new note or delete content. For existing files with content, old_string is mandatory and must never be empty: use view first, then copy exact text including whitespace, indentation, blank lines, and line breaks. Empty old_string is allowed only when creating a brand-new file or when writing content into an existing empty (or whitespace-only) file. When replace_all is false, old_string must uniquely identify one occurrence; include 3-5 lines of surrounding context before and after the change. Delete content by providing old_string and leaving new_string empty. If old_string is not found, view the file again and copy a larger exact block; never guess. Correct example: old_string='## Summary\\n\\nThe catalog supports locale-aware attributes.\\n\\n## Details' and new_string='## Summary\\n\\nThe catalog supports locale-aware attributes and recommendations.\\n\\n## Details'. Incorrect examples: old_string='## Summary' because it lacks context, or old_string with one blank line when the file has two. Exact whitespace matters. Returns a JSON string with additions, removals, old_content, and new_content.",
 			schema: z.object({
 				intent: intentSchema,
 				file_path: z.string().describe("The vault note path to create or modify. Use forward slashes. .md is appended if missing."),
-				old_string: z.string().describe("The exact text to replace. Required and non-empty for existing files. Must match whitespace and line breaks exactly. Use an empty string to create a brand-new note or to fill an existing empty note."),
+				old_string: z.string().describe("The exact text to replace. Required and non-empty for existing files with content. Must match whitespace and line breaks exactly. Use an empty string to create a brand-new note or to fill an existing empty note."),
 				new_string: z.string().describe("The text to replace old_string with. Use an empty string to delete old_string."),
 				replace_all: z.boolean().optional().default(false).describe("Replace all occurrences of old_string. Defaults to false; when false, old_string must match exactly one location."),
 			}),
