@@ -32,9 +32,11 @@ const context = await esbuild.context({
 		"@lezer/highlight",
 		"@lezer/lr",
 		...builtinModules,
-		// Also mark the `node:` prefixed builtins external; required so
-		// `import { AsyncLocalStorage } from "node:async_hooks"` resolves to
-		// the runtime module inside Obsidian's Electron renderer.
+		// Node builtins are marked external so any runtime require("...") the
+		// bundle performs (e.g. the lazy require("async_hooks") our AsyncLocalStorage
+		// port uses — see src/utils/async-local-storage.ts) resolves against
+		// Electron's Node runtime instead of being bundled. Porygon no longer
+		// statically imports a node builtin; this stays as a safety net.
 		...builtinModules.map((m) => `node:${m}`)],
 	format: "cjs",
 	target: "es2018",

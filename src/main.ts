@@ -7,6 +7,7 @@ import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
 import { getActiveProvider } from "./providers";
+import { initLangGraphAsyncContext } from "./agent/context";
 
 export default class PorygonPlugin extends Plugin {
 	settings!: PorygonPluginSettings;
@@ -21,6 +22,15 @@ export default class PorygonPlugin extends Plugin {
 	private ragStore!: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
+		// LangGraph's interrupt()/ask_user pauses the graph, surfaces to the UI,
+		// and resumes via Command({ resume }); that only works when
+		// @langchain/core's global AsyncLocalStorage singleton carries the active
+		// RunnableConfig across nested runs. We wire it here—once, before any
+		// agent stream runs—via our async_hooks-backed implementation
+		// (agent/langgraph-context.ts), never Node's own AsyncLocalStorage class,
+		// which aborts the Electron renderer on Node 24+.
+		initLangGraphAsyncContext();
+
 		await this.loadSettings();
 		this.skills = new SkillsService(this.app, () => this.settings.porygonFolder);
 		this.ragStore = new RagIndexedDbStore(this.app);
