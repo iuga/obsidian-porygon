@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
@@ -9,6 +7,7 @@ import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
 import { getActiveProvider } from "./providers";
+import { initLangGraphAsyncContext } from "./agent/context";
 
 export default class PorygonPlugin extends Plugin {
 	settings!: PorygonPluginSettings;
@@ -23,11 +22,14 @@ export default class PorygonPlugin extends Plugin {
 	private ragStore!: RagIndexedDbStore;
 
 	async onload(): Promise<void> {
-		// LangGraph's `interrupt()` resumes the right async context only when
-		// `AsyncLocalStorage` is wired into the singleton provider. We do it
-		// here (once, before any agent stream runs) instead of at module load
-		// to keep side effects out of import time.
-		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
+		// LangGraph's interrupt()/ask_user pauses the graph, surfaces to the UI,
+		// and resumes via Command({ resume }); that only works when
+		// @langchain/core's global AsyncLocalStorage singleton carries the active
+		// RunnableConfig across nested runs. We wire it here—once, before any
+		// agent stream runs—via our async_hooks-backed implementation
+		// (agent/context.ts, backed by utils/async-local-storage.ts), never Node's
+		// own AsyncLocalStorage class, which aborts the Electron renderer on Node 24+.
+		initLangGraphAsyncContext();
 
 		await this.loadSettings();
 		this.skills = new SkillsService(this.app, () => this.settings.porygonFolder);
