@@ -29,6 +29,13 @@
  * Porygon ships `isDesktopOnly: true`, so the shim is a defensive fallback only.
  */
 
+/**
+ * The `AsyncLocalStorage` surface Porygon needs: the subset
+ * `@langchain/core`'s `AsyncLocalStorageInterface` requires
+ * (`getStore`/`run`/`enterWith`), not Node's full class — `run` takes no
+ * trailing args (langchain's callback ignores them) and `getStore()` returns
+ * `undefined` while a storage is disabled.
+ */
 export interface AsyncLocalStorageLike<T> {
 	getStore(): T | undefined;
 	run<R>(store: T, fn: () => R): R;
@@ -85,25 +92,30 @@ function asAsyncHooks(candidate: unknown): AsyncHooksPrimitives | null {
 
 /** Resolve the renderer's `node:async_hooks` (createHook + executionAsyncResource), or null. */
 function tryRequireAsyncHooks(): AsyncHooksPrimitives | null {
-	// Electron's renderer exposes CommonJS `require` on the global object. Probe the
-	// runtime global (`globalThis`, not `window`) so it also resolves in a Node context.
+	// `obsidianmd/no-global-this` bans the bare `global`/`globalThis` identifiers
+	// (and that rule can't be disabled here), so we never name the global. Instead
+	// we probe each runtime with the accessor that exists in it: `window` is the
+	// renderer's global (and `require` lives on it); on a plain Node runner
+	// `window` is absent, so we fall through to `process.getBuiltinModule`.
+	//
+	// Electron's renderer exposes CommonJS `require` on its global object.
 	try {
-		// eslint-disable-next-line obsidianmd/no-global-this -- deliberate runtime-global probe
-		const req = (globalThis as { require?: (id: string) => unknown }).require;
+		const req = (window as unknown as { require?: (id: string) => unknown }).require;
 		if (typeof req === "function") {
 			const mod = asAsyncHooks(req("async_hooks"));
 			if (mod) return mod;
 		}
 	} catch {
-		// fall through
+		// `window` is undefined in a non-DOM (e.g. Vitest) runner — fall through.
 	}
 	// Plain Node (e.g. Vitest) has no global `require` under ESM, but exposes the
 	// synchronous builtin accessor `process.getBuiltinModule` (Node 20.16+).
 	try {
-		// eslint-disable-next-line obsidianmd/no-global-this -- deliberate runtime-global probe
-		const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
-		if (typeof proc?.getBuiltinModule === "function") {
-			const mod = asAsyncHooks(proc.getBuiltinModule("async_hooks"));
+		const getBuiltinModule = (process as unknown as {
+			getBuiltinModule?: (id: string) => unknown;
+		}).getBuiltinModule;
+		if (typeof getBuiltinModule === "function") {
+			const mod = asAsyncHooks(getBuiltinModule("async_hooks"));
 			if (mod) return mod;
 		}
 	} catch {
@@ -113,9 +125,6 @@ function tryRequireAsyncHooks(): AsyncHooksPrimitives | null {
 }
 
 const asyncHooks = tryRequireAsyncHooks();
-
-/** True when the `async_hooks`-backed implementation is in use (desktop). */
-export const hasAsyncHooksAsyncLocalStorage = asyncHooks !== null;
 
 /**
  * Every enabled instance, so the single shared hook can propagate all of their

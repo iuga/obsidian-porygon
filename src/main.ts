@@ -27,8 +27,8 @@ export default class PorygonPlugin extends Plugin {
 		// @langchain/core's global AsyncLocalStorage singleton carries the active
 		// RunnableConfig across nested runs. We wire it here—once, before any
 		// agent stream runs—via our async_hooks-backed implementation
-		// (agent/langgraph-context.ts), never Node's own AsyncLocalStorage class,
-		// which aborts the Electron renderer on Node 24+.
+		// (agent/context.ts, backed by utils/async-local-storage.ts), never Node's
+		// own AsyncLocalStorage class, which aborts the Electron renderer on Node 24+.
 		initLangGraphAsyncContext();
 
 		await this.loadSettings();
