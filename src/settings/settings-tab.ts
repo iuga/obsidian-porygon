@@ -8,6 +8,11 @@ import type { ThinkingEffort } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
 
+// Sentinel dropdown value that switches a model field into free-text mode, so a
+// user can type a model name the configured Ollama host doesn't currently report
+// (a tag alias, or a model that isn't pulled yet).
+const MODEL_NAME_CUSTOM = "__custom__";
+
 export class PorygonSettingTab extends PluginSettingTab {
 	plugin: PorygonPlugin;
 	private statusSetting: Setting | null = null;
@@ -21,6 +26,22 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// clobber what the user typed.
 	private porygonFolderDraft: string | null = null;
 	private isMovingPorygonFolder = false;
+	// Model fields the user switched into free-text mode via "enter a model name…".
+	// Persisted across re-renders so a typed name isn't lost when the tab
+	// refreshes (e.g. when the model list finishes loading).
+	private readonly manualModelInput = new Set<ModelSettingKey>();
+	// Per-model in-place refresher registered by the 1.13+ getSettingDefinitions()
+	// render() path. Used to rebuild a model row when the async model list
+	// arrives, since the declarative tab can't be re-rendered without the
+	// 1.13-only SettingTab.update().
+	private modelRowRefreshers: Partial<Record<ModelSettingKey, () => void>> = {};
+	// True once the 1.13+ getSettingDefinitions() render path has run, so the
+	// async model-list refresh rebuilds the rows in place instead of using the
+	// legacy imperative refresh().
+	private declarativeUi = false;
+	// Set when the settings modal closes; suppresses an in-flight model-list
+	// refresh from re-rendering a tab the user has already left.
+	private hidden = false;
 	private readonly persist = debounce(() => {
 		void this.plugin.saveSettings();
 	}, 400, true);
@@ -52,8 +73,15 @@ export class PorygonSettingTab extends PluginSettingTab {
 					{
 						name: "Chat model",
 						desc: "Model used for chat responses.",
-						control: { key: "ollamaChatModel", type: "text" },
-					},
+						aliases: ["chat model", "model"],
+						// On 1.13+ the whole tab renders from getSettingDefinitions(),
+						// so the picker is a render() hook (not a static control): the
+						// available models are fetched live from the Ollama host.
+						render: (setting) => {
+							this.declarativeUi = true;
+							this.renderModelRow(setting, "ollamaChatModel", "completion");
+						},
+					} satisfies SettingDefinition,
 					{
 						name: "Thinking effort",
 						desc: "How much the model reasons before answering.",
@@ -67,8 +95,12 @@ export class PorygonSettingTab extends PluginSettingTab {
 					{
 						name: "Embeddings model",
 						desc: "Model used for semantic search.",
-						control: { key: "ollamaEmbeddingModel", type: "text" },
-					},
+						aliases: ["embedding", "embeddings"],
+						render: (setting) => {
+							this.declarativeUi = true;
+							this.renderModelRow(setting, "ollamaEmbeddingModel", "embedding");
+						},
+					} satisfies SettingDefinition,
 				],
 			},
 			{
@@ -165,9 +197,49 @@ export class PorygonSettingTab extends PluginSettingTab {
 	private refresh(): void {
 		this.containerEl.empty();
 		this.renderSections();
+		this.ensureModelsLoaded();
+	}
+
+	// Kicks off the async model-list fetch for the current host if it hasn't run
+	// yet. A host change is detected by comparing against the host already
+	// fetched, so a settings re-render never re-fetches the same list.
+	private ensureModelsLoaded(): void {
 		const host = this.getHost();
 		if (this.modelsHost !== host) {
 			void this.loadModels(host);
+		}
+	}
+
+	// Rebuilds every model row after the model list arrives. On the legacy
+	// display() path the whole tab is re-rendered imperatively; on the 1.13+
+	// getSettingDefinitions() path the tab can't be re-rendered without the
+	// 1.13-only SettingTab.update(), so we rebuild just the model rows in place
+	// instead. That keeps back-compat with minAppVersion (1.8.7): legacy users
+	// still get their full re-render, 1.13+ users get their rows refreshed.
+	private reflow(): void {
+		if (this.hidden) {
+			return;
+		}
+		if (this.declarativeUi) {
+			for (const refresh of Object.values(this.modelRowRefreshers)) {
+				refresh?.();
+			}
+		} else {
+			this.refresh();
+		}
+	}
+
+	// Refreshes a single model row after the user switches its mode (dropdown <->
+	// free text) or changes the model. A targeted refresher on 1.13+, a full
+	// re-render on the legacy path.
+	private reflowModelRow(key: ModelSettingKey): void {
+		if (this.hidden) {
+			return;
+		}
+		if (this.declarativeUi) {
+			this.modelRowRefreshers[key]?.();
+		} else {
+			this.refresh();
 		}
 	}
 
@@ -177,6 +249,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.unsubscribeProgress = null;
 		this.statusSetting = null;
 		this.porygonFolderDraft = null;
+		this.hidden = true;
 	}
 
 	private renderSections(): void {
@@ -389,29 +462,87 @@ export class PorygonSettingTab extends PluginSettingTab {
 		};
 	}
 
+	// Imperative display() path: create the row, then delegate to the shared
+	// renderModelRow so the legacy (< 1.13) tab and the 1.13+ declarative tab
+	// build the model picker the same way.
 	private renderModelDropdown(containerEl: HTMLElement, key: ModelSettingKey, name: string, desc: string, capability: string): void {
-		const current = this.plugin.settings[key];
-		const available = this.models.filter((m) => this.modelCapabilities[m]?.includes(capability));
-		const installed = current ? available.includes(current) : false;
-		const hasAny = available.length > 0 || !!current;
-
 		const setting = new Setting(containerEl).setName(name).setDesc(desc);
+		this.renderModelRow(setting, key, capability);
+	}
+
+	// Shared model picker, used by both the imperative display() path and the
+	// 1.13+ getSettingDefinitions() render() path. A dropdown of the models
+	// currently pulled on the configured Ollama host (filtered by `capability`,
+	// with the chat model's capability labels shown beneath it), plus an
+	// "enter a model name…" option that switches the field to free text for a
+	// name the host doesn't report (a tag alias, or a not-yet-pulled model).
+	private renderModelRow(setting: Setting, key: ModelSettingKey, capability: string): void {
+		this.hidden = false;
+		this.ensureModelsLoaded();
+		// On the 1.13+ path keep a handle on this row so the async model list can
+		// rebuild it in place when it arrives.
+		if (this.declarativeUi) {
+			this.modelRowRefreshers[key] = () => this.buildModelRow(setting, key, capability);
+		}
+		this.buildModelRow(setting, key, capability);
+	}
+
+	// Builds the model row for a single Setting. Idempotent: it clears any
+	// control and capability labels from a previous build before re-adding them,
+	// so the 1.13+ in-place refresher can run it again on the same row without
+	// stacking controls or extra buttons.
+	private buildModelRow(setting: Setting, key: ModelSettingKey, capability: string): void {
+		setting.controlEl.empty();
+		const staleTags = setting.descEl.querySelector(".porygon-settings-capability-tags");
+		if (staleTags) {
+			staleTags.remove();
+		}
+
+		const current = this.plugin.settings[key] ?? "";
+
+		if (this.manualModelInput.has(key)) {
+			this.renderManualModelText(setting, key, current);
+			return;
+		}
+
+		const available = this.models.filter((model) => this.modelCapabilities[model]?.includes(capability));
+		const installed = current ? available.includes(current) : false;
+
+		// Nothing on the host offers a choice for this field (no matching models
+		// and no saved value): offer free text directly so a fresh host can still
+		// be configured. Skipped while loading to avoid flickering an empty input.
+		if (!current && !installed && this.modelsStatus !== "loading" && available.length === 0) {
+			this.renderManualModelText(setting, key, "");
+			return;
+		}
+
 		setting.addDropdown((dd) => {
-			if (!hasAny) {
-				dd.addOption("", "No models available");
-				dd.selectEl.disabled = true;
-				return;
-			}
 			if (current && !installed) {
 				dd.addOption(current, `${current} (not installed)`);
 			}
-			available.forEach((m) => { dd.addOption(m, m); });
-			dd.setValue(current || this.pickDefault(key, available));
+			available.forEach((model) => { dd.addOption(model, model); });
+			dd.addOption(MODEL_NAME_CUSTOM, "Enter a model name…");
+
+			// A saved value always wins (shown as its real entry, or as a
+			// "(not installed)" entry); only fall back to a sensible default,
+			// then to free text, when nothing is saved yet.
+			const startValue = current
+				|| (this.modelsStatus === "ok" ? this.pickDefault(key, available) : MODEL_NAME_CUSTOM);
+			dd.setValue(startValue || MODEL_NAME_CUSTOM);
+
 			dd.onChange((value) => {
+				if (value === MODEL_NAME_CUSTOM) {
+					this.manualModelInput.add(key);
+					this.reflowModelRow(key);
+					return;
+				}
 				this.plugin.settings[key] = value;
+				this.manualModelInput.delete(key);
 				this.persist();
+				// The chat model's capabilities gate the thinking-effort control,
+				// so refresh when the chat model changes.
 				if (key === "ollamaChatModel") {
-					this.refresh();
+					this.reflowModelRow(key);
 				}
 			});
 		});
@@ -419,6 +550,32 @@ export class PorygonSettingTab extends PluginSettingTab {
 		if (key === "ollamaChatModel") {
 			this.renderCapabilityTags(setting, current);
 		}
+	}
+
+	// Free-text variant of the model picker, reached via the "enter a model name…"
+	// option. Pre-filled with the current value; a button switches back to the
+	// dropdown of installed models. The button is created inside controlEl (not
+	// via addExtraButton, whose container placement isn't guaranteed) so the
+	// in-place rebuild's controlEl.empty() reliably clears it across re-renders.
+	private renderManualModelText(setting: Setting, key: ModelSettingKey, current: string): void {
+		const placeholder = key === "ollamaChatModel" ? "e.g. qwen3, gemma4" : "e.g. qwen3-embedding";
+		setting.addText((text) => text
+			.setValue(current)
+			.setPlaceholder(placeholder)
+			.onChange((value) => {
+				this.plugin.settings[key] = value.trim();
+				this.persist();
+			}));
+
+		const backButton = setting.controlEl.createEl("button", {
+			cls: "mod-compact",
+			text: "Pick from installed models",
+			attr: { title: "Pick from installed models" },
+		});
+		backButton.addEventListener("click", () => {
+			this.manualModelInput.delete(key);
+			this.reflowModelRow(key);
+		});
 	}
 
 	private renderThinkingEffort(containerEl: HTMLElement): void {
@@ -498,7 +655,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.models = models;
 		this.modelCapabilities = capabilities;
 		this.modelsStatus = ok ? "ok" : "error";
-		this.refresh();
+		// The model list just changed: re-render whichever UI path is active so
+		// the dropdowns and capability labels update in place.
+		this.reflow();
 	}
 
 	private getHost(): string {
