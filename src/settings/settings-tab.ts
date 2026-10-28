@@ -127,16 +127,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 						desc: "Live status of the local semantic index.",
 						aliases: ["semantic index", "rag", "indexing"],
 						render: (setting) => {
-							const unsubscribe = this.plugin.ragIndexer.onProgress((progress) => {
-								setting.setDesc(this.getSemanticIndexStatusText(progress));
-							});
-							setting
-								.addExtraButton((btn) => btn
-									.setIcon("refresh-cw")
-									.setTooltip("Reprocess index")
-									.onClick(() => {
-										void this.plugin.ragIndexer.reconcile();
-									}));
+							const unsubscribe = this.bindIndexProgress(setting);
+							this.addReprocessButton(setting);
 							return unsubscribe;
 						},
 					} satisfies SettingDefinition,
@@ -307,13 +299,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const semanticItems = semanticGroup.createDiv({ cls: "setting-items" });
 
 		this.statusSetting = new Setting(semanticItems)
-			.setName("Index status")
-			.addExtraButton((btn) => btn
-				.setIcon("refresh-cw")
-				.setTooltip("Reprocess index")
-				.onClick(() => {
-					void this.plugin.ragIndexer.reconcile();
-				}));
+			.setName("Index status");
+		this.addReprocessButton(this.statusSetting);
 		this.subscribeToIndexProgress();
 
 		const ignoredPathsSetting = new Setting(semanticItems)
@@ -537,11 +524,31 @@ export class PorygonSettingTab extends PluginSettingTab {
 		return available[0] ?? "";
 	}
 
-	private subscribeToIndexProgress(): void {
-		this.unsubscribeProgress?.();
-		this.unsubscribeProgress = this.plugin.ragIndexer.onProgress((progress) => {
-			this.statusSetting?.setDesc(this.getSemanticIndexStatusText(progress));
+	// "Reprocess index" affordance shared by the legacy display() row and the
+	// 1.13+ declarative render() row, so the two stay in sync.
+	private addReprocessButton(setting: Setting): void {
+		setting.addExtraButton((btn) => btn
+			.setIcon("refresh-cw")
+			.setTooltip("Reprocess index")
+			.onClick(() => {
+				void this.plugin.ragIndexer.reconcile();
+			}));
+	}
+
+	// Binds a status row's description to live index progress and returns an
+	// unsubscribe so the caller owns the row's lifecycle.
+	private bindIndexProgress(setting: Setting): () => void {
+		return this.plugin.ragIndexer.onProgress((progress) => {
+			setting.setDesc(this.getSemanticIndexStatusText(progress));
 		});
+	}
+
+	private subscribeToIndexProgress(): void {
+		if (!this.statusSetting) {
+			return;
+		}
+		this.unsubscribeProgress?.();
+		this.unsubscribeProgress = this.bindIndexProgress(this.statusSetting);
 	}
 
 	private getSemanticIndexStatusText(progress: RagIndexProgress): string {
