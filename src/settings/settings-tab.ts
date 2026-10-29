@@ -30,16 +30,24 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// render() path. The chat model's capabilities gate this control, so it is
 	// rebuilt alongside the chat model row when the model or model list changes.
 	private thinkingEffortRefresher: (() => void) | null = null;
-	// True once the 1.13+ getSettingDefinitions() render path has run, so the
-	// async model-list refresh rebuilds the rows in place instead of using the
-	// legacy imperative refresh().
-	private declarativeUi = false;
+	// In-place refresher for the "Ollama host" row's status line, registered by
+	// the 1.13+ getSettingDefinitions() render() path. Only the status
+	// description depends on the async model list, so it is updated alone (the
+	// text input is not rebuilt, which would steal focus and reset a half-typed
+	// host) whenever the model list refreshes.
+	private hostRowRefresher: (() => void) | null = null;
 	// Set when the settings modal closes; suppresses an in-flight model-list
 	// refresh from re-rendering a tab the user has already left.
 	private hidden = false;
 	private readonly persist = debounce(() => {
 		void this.plugin.saveSettings();
 	}, 400, true);
+	// Re-pulls the model list after the host changes. Trailing-edge (resetTimer)
+	// so a user typing a new address issues one fetch, not one per keystroke,
+	// matching the `persist` convention above.
+	private readonly reloadModelsDebounced = debounce(() => {
+		this.reloadModelsNow();
+	}, 350, true);
 
 	constructor(plugin: PorygonPlugin) {
 		super(plugin.app, plugin);
@@ -63,7 +71,16 @@ export class PorygonSettingTab extends PluginSettingTab {
 					{
 						name: "Ollama host",
 						desc: "Host used by chat and embeddings.",
-						control: { key: "ollamaHost", type: "text", placeholder: ONBOARDING_DEFAULTS.ollamaHost },
+						// The "Reload model list" button lives to the right of the
+						// host input rather than as a group-level extra button,
+						// which Obsidian rendered in the section header — outside
+						// the host row, so it read as disconnected. A render()
+						// hook is required because a static text control can't carry
+						// an extra button; it also lets pressing Enter on the input
+						// trigger the same refresh.
+						render: (setting) => {
+							this.renderHostRow(setting);
+						},
 					},
 					{
 						name: "Chat model",
@@ -73,7 +90,6 @@ export class PorygonSettingTab extends PluginSettingTab {
 						// so the picker is a render() hook (not a static control): the
 						// available models are fetched live from the Ollama host.
 						render: (setting) => {
-							this.declarativeUi = true;
 							this.renderModelRow(setting, "ollamaChatModel", "completion");
 						},
 					} satisfies SettingDefinition,
@@ -86,7 +102,6 @@ export class PorygonSettingTab extends PluginSettingTab {
 						// row can't be a static control: on 1.13+ it is a render() hook
 						// that rebuilds the row in place.
 						render: (setting) => {
-							this.declarativeUi = true;
 							this.renderThinkingEffortRow(setting);
 						},
 					} satisfies SettingDefinition,
@@ -95,7 +110,6 @@ export class PorygonSettingTab extends PluginSettingTab {
 						desc: "Model used for semantic search.",
 						aliases: ["embedding", "embeddings"],
 						render: (setting) => {
-							this.declarativeUi = true;
 							this.renderModelRow(setting, "ollamaEmbeddingModel", "embedding");
 						},
 					} satisfies SettingDefinition,
@@ -188,7 +202,8 @@ export class PorygonSettingTab extends PluginSettingTab {
 	}
 
 	async setControlValue(key: string, value: unknown): Promise<void> {
-		(this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+		const settings = this.plugin.settings as unknown as Record<string, unknown>;
+		settings[key] = value;
 		await this.plugin.saveSettings();
 	}
 
@@ -208,42 +223,41 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 	}
 
-	// Rebuilds every model row after the model list arrives. On the legacy
-	// display() path the whole tab is re-rendered imperatively; on the 1.13+
-	// getSettingDefinitions() path the tab can't be re-rendered without the
-	// 1.13-only SettingTab.update(), so we rebuild just the model rows in place
-	// instead. That keeps back-compat with minAppVersion (1.8.7): legacy users
-	// still get their full re-render, 1.13+ users get their rows refreshed.
+	// True on Obsidian 1.13+, where the tab is rendered from getSettingDefinitions()
+	// and SettingTab.update() exists. The back-compat floor is 1.8.7, which lacks
+	// it, so model-list refreshes fall back to the legacy imperative refresh().
+	private isDeclarativeUi(): boolean {
+		return typeof (this as { update?: unknown }).update === "function";
+	}
+
+	// Re-pull the model list for the configured host. Used by the "Reload model
+	// list" buttons, by host edits (debounced through reloadModelsDebounced), and
+	// on first open.
+	private reloadModelsNow(): void {
+		this.modelsHost = null;
+		this.ensureModelsLoaded();
+	}
+
+	// Rebuilds the in-place model rows after the model list changes. On the 1.13+
+	// getSettingDefinitions() path we rebuild just the model + thinking-effort
+	// rows instead of calling the 1.13-only SettingTab.update(): a full-tab
+	// re-render would recreate the static Porygon-folder input from its stored
+	// value and clobber a half-typed path, whereas these rows own only their own
+	// dropdowns. On the legacy display() path the whole tab re-renders via refresh().
 	private reflow(): void {
 		if (this.hidden) {
 			return;
 		}
-		if (this.declarativeUi) {
+		if (this.isDeclarativeUi()) {
 			for (const refresh of Object.values(this.modelRowRefreshers)) {
 				refresh?.();
 			}
 			// The chat model's capabilities gate the thinking-effort control, so
 			// rebuild it too whenever the model list refreshes.
 			this.thinkingEffortRefresher?.();
-		} else {
-			this.refresh();
-		}
-	}
-
-	// Refreshes a single model row after the user changes the model (or the model
-	// list arrives). A targeted refresher on 1.13+, a full re-render on the legacy
-	// path.
-	private reflowModelRow(key: ModelSettingKey): void {
-		if (this.hidden) {
-			return;
-		}
-		if (this.declarativeUi) {
-			this.modelRowRefreshers[key]?.();
-			// The chat model's capabilities gate the thinking-effort control, so
-			// rebuild it too when the chat model changes.
-			if (key === "ollamaChatModel") {
-				this.thinkingEffortRefresher?.();
-			}
+			// The host row's status line mirrors the live model-list state, so
+			// refresh it too (description only, without rebuilding the input).
+			this.hostRowRefresher?.();
 		} else {
 			this.refresh();
 		}
@@ -256,6 +270,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.statusSetting = null;
 		this.porygonFolderDraft = null;
 		this.hidden = true;
+		// Cancel a host-driven reload still pending from typing before the user
+		// closed the tab so it doesn't issue an orphaned fetch.
+		this.reloadModelsDebounced.cancel();
 	}
 
 	private renderSections(): void {
@@ -266,23 +283,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const providerGroup = containerEl.createDiv({ cls: "setting-group" });
 		const providerItems = providerGroup.createDiv({ cls: "setting-items" });
 
-		new Setting(providerItems)
-			.setName("Ollama host")
-			.setDesc(this.getHostStatusDesc())
-			.addText((text) => text
-				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaHost)
-				.setValue(this.plugin.settings.ollamaHost)
-				.onChange((value) => {
-					this.plugin.settings.ollamaHost = value.trim();
-					this.persist();
-				}))
-			.addExtraButton((btn) => btn
-				.setIcon("refresh-cw")
-				.setTooltip("Reload model list")
-				.onClick(() => {
-					this.modelsHost = null;
-					this.refresh();
-				}));
+		this.renderHostRow(new Setting(providerItems));
 
 		this.renderModelDropdown(providerItems, "ollamaChatModel", "Chat model", "Model used for chat responses.", "completion");
 		this.renderThinkingEffort(providerItems);
@@ -485,7 +486,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 		this.ensureModelsLoaded();
 		// On the 1.13+ path keep a handle on this row so the async model list can
 		// rebuild it in place when it arrives.
-		if (this.declarativeUi) {
+		if (this.isDeclarativeUi()) {
 			this.modelRowRefreshers[key] = () => this.buildModelRow(setting, key, capability);
 		}
 		this.buildModelRow(setting, key, capability);
@@ -529,9 +530,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 				this.plugin.settings[key] = value;
 				this.persist();
 				// The chat model's capabilities gate the thinking-effort control,
-				// so refresh when the chat model changes.
+				// so rebuild the dynamic rows when the chat model changes.
 				if (key === "ollamaChatModel") {
-					this.reflowModelRow(key);
+					this.reflow();
 				}
 			});
 		});
@@ -539,6 +540,66 @@ export class PorygonSettingTab extends PluginSettingTab {
 		if (key === "ollamaChatModel") {
 			this.renderCapabilityTags(setting, current);
 		}
+	}
+
+	// Shared "Ollama host" row, used by both the legacy imperative display() path
+	// and the 1.13+ getSettingDefinitions() render() path, so they build the host
+	// input and its "Reload model list" button the same way. The input and button
+	// are created once; on the 1.13+ path only the live status line is re-bound,
+	// because rebuilding the input on every model-list refresh would steal focus
+	// and reset a half-typed host.
+	private renderHostRow(setting: Setting): void {
+		this.hidden = false;
+		// Keep a handle to refresh just the status description in place, mirroring
+		// how the model rows are rebuilt in place on the 1.13+ path.
+		if (this.isDeclarativeUi()) {
+			this.hostRowRefresher = () => {
+				setting.setDesc(this.getHostStatusDesc());
+			};
+		}
+		this.buildHostRow(setting);
+	}
+
+	// Builds the "Ollama host" row: a text input bound to the saved host, an
+	// immediate refresh on Enter, and the "Reload model list" button sitting to
+	// the right of the input. Idempotent (clears any prior control) so it is
+	// safe to run again on the same row. Typing a new address debounces a refresh
+	// (one fetch, not one per keystroke); Enter and the button refresh at once,
+	// cancelling any trailing debounced fetch so the explicit action is the one
+	// that runs.
+	private buildHostRow(setting: Setting): void {
+		setting.setName("Ollama host");
+		setting.controlEl.empty();
+		setting.setDesc(this.getHostStatusDesc());
+
+		setting.addText((text) => {
+			text
+				.setPlaceholder(ONBOARDING_DEFAULTS.ollamaHost)
+				.setValue(this.plugin.settings.ollamaHost)
+				.onChange((value) => {
+					this.plugin.settings.ollamaHost = value.trim();
+					this.persist();
+					this.reloadModelsDebounced.run();
+				});
+			// Enter commits an immediate refresh, mirroring the button below.
+			// Attached on the input element itself (created above) so it shares
+			// the listener's lifetime with the row and no stale reference lingers.
+			text.inputEl.addEventListener("keydown", (event) => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					this.reloadModelsDebounced.cancel();
+					this.reloadModelsNow();
+				}
+			});
+		});
+
+		setting.addExtraButton((btn) => btn
+			.setIcon("refresh-cw")
+			.setTooltip("Reload model list")
+			.onClick(() => {
+				this.reloadModelsDebounced.cancel();
+				this.reloadModelsNow();
+			}));
 	}
 
 	// Legacy imperative display() path: create the row, then delegate to the
@@ -554,7 +615,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// so the async model list and chat-model changes can rebuild it in place, since
 	// the declarative tab can't be re-rendered without the 1.13-only update().
 	private renderThinkingEffortRow(setting: Setting): void {
-		if (this.declarativeUi) {
+		if (this.isDeclarativeUi()) {
 			this.thinkingEffortRefresher = () => this.buildThinkingEffortRow(setting);
 		}
 		this.buildThinkingEffortRow(setting);
