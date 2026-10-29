@@ -8,11 +8,6 @@ import type { ThinkingEffort } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
 
-// Sentinel dropdown value that switches a model field into free-text mode, so a
-// user can type a model name the configured Ollama host doesn't currently report
-// (a tag alias, or a model that isn't pulled yet).
-const MODEL_NAME_CUSTOM = "__custom__";
-
 export class PorygonSettingTab extends PluginSettingTab {
 	plugin: PorygonPlugin;
 	private statusSetting: Setting | null = null;
@@ -26,10 +21,6 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// clobber what the user typed.
 	private porygonFolderDraft: string | null = null;
 	private isMovingPorygonFolder = false;
-	// Model fields the user switched into free-text mode via "enter a model name…".
-	// Persisted across re-renders so a typed name isn't lost when the tab
-	// refreshes (e.g. when the model list finishes loading).
-	private readonly manualModelInput = new Set<ModelSettingKey>();
 	// Per-model in-place refresher registered by the 1.13+ getSettingDefinitions()
 	// render() path. Used to rebuild a model row when the async model list
 	// arrives, since the declarative tab can't be re-rendered without the
@@ -229,9 +220,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 	}
 
-	// Refreshes a single model row after the user switches its mode (dropdown <->
-	// free text) or changes the model. A targeted refresher on 1.13+, a full
-	// re-render on the legacy path.
+	// Refreshes a single model row after the user changes the model (or the model
+	// list arrives). A targeted refresher on 1.13+, a full re-render on the legacy
+	// path.
 	private reflowModelRow(key: ModelSettingKey): void {
 		if (this.hidden) {
 			return;
@@ -473,9 +464,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// Shared model picker, used by both the imperative display() path and the
 	// 1.13+ getSettingDefinitions() render() path. A dropdown of the models
 	// currently pulled on the configured Ollama host (filtered by `capability`,
-	// with the chat model's capability labels shown beneath it), plus an
-	// "enter a model name…" option that switches the field to free text for a
-	// name the host doesn't report (a tag alias, or a not-yet-pulled model).
+	// with the chat model's capability labels shown beneath it).
 	private renderModelRow(setting: Setting, key: ModelSettingKey, capability: string): void {
 		this.hidden = false;
 		this.ensureModelsLoaded();
@@ -499,45 +488,30 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 
 		const current = this.plugin.settings[key] ?? "";
-
-		if (this.manualModelInput.has(key)) {
-			this.renderManualModelText(setting, key, current);
-			return;
-		}
-
 		const available = this.models.filter((model) => this.modelCapabilities[model]?.includes(capability));
 		const installed = current ? available.includes(current) : false;
-
-		// Nothing on the host offers a choice for this field (no matching models
-		// and no saved value): offer free text directly so a fresh host can still
-		// be configured. Skipped while loading to avoid flickering an empty input.
-		if (!current && !installed && this.modelsStatus !== "loading" && available.length === 0) {
-			this.renderManualModelText(setting, key, "");
-			return;
-		}
+		// A saved value (even if not installed) or any matching model means the
+		// field has a dropdown to offer; otherwise leave it disabled.
+		const hasChoice = available.length > 0 || !!current;
 
 		setting.addDropdown((dd) => {
+			if (!hasChoice) {
+				dd.addOption("", "No models available");
+				dd.selectEl.disabled = true;
+				return;
+			}
 			if (current && !installed) {
 				dd.addOption(current, `${current} (not installed)`);
 			}
 			available.forEach((model) => { dd.addOption(model, model); });
-			dd.addOption(MODEL_NAME_CUSTOM, "Enter a model name…");
 
 			// A saved value always wins (shown as its real entry, or as a
-			// "(not installed)" entry); only fall back to a sensible default,
-			// then to free text, when nothing is saved yet.
-			const startValue = current
-				|| (this.modelsStatus === "ok" ? this.pickDefault(key, available) : MODEL_NAME_CUSTOM);
-			dd.setValue(startValue || MODEL_NAME_CUSTOM);
+			// "(not installed)" entry); only fall back to a sensible default
+			// when nothing is saved yet.
+			dd.setValue(current || this.pickDefault(key, available));
 
 			dd.onChange((value) => {
-				if (value === MODEL_NAME_CUSTOM) {
-					this.manualModelInput.add(key);
-					this.reflowModelRow(key);
-					return;
-				}
 				this.plugin.settings[key] = value;
-				this.manualModelInput.delete(key);
 				this.persist();
 				// The chat model's capabilities gate the thinking-effort control,
 				// so refresh when the chat model changes.
@@ -550,32 +524,6 @@ export class PorygonSettingTab extends PluginSettingTab {
 		if (key === "ollamaChatModel") {
 			this.renderCapabilityTags(setting, current);
 		}
-	}
-
-	// Free-text variant of the model picker, reached via the "enter a model name…"
-	// option. Pre-filled with the current value; a button switches back to the
-	// dropdown of installed models. The button is created inside controlEl (not
-	// via addExtraButton, whose container placement isn't guaranteed) so the
-	// in-place rebuild's controlEl.empty() reliably clears it across re-renders.
-	private renderManualModelText(setting: Setting, key: ModelSettingKey, current: string): void {
-		const placeholder = key === "ollamaChatModel" ? "e.g. qwen3, gemma4" : "e.g. qwen3-embedding";
-		setting.addText((text) => text
-			.setValue(current)
-			.setPlaceholder(placeholder)
-			.onChange((value) => {
-				this.plugin.settings[key] = value.trim();
-				this.persist();
-			}));
-
-		const backButton = setting.controlEl.createEl("button", {
-			cls: "mod-compact",
-			text: "Pick from installed models",
-			attr: { title: "Pick from installed models" },
-		});
-		backButton.addEventListener("click", () => {
-			this.manualModelInput.delete(key);
-			this.reflowModelRow(key);
-		});
 	}
 
 	private renderThinkingEffort(containerEl: HTMLElement): void {
