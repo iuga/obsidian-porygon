@@ -26,6 +26,10 @@ export class PorygonSettingTab extends PluginSettingTab {
 	// arrives, since the declarative tab can't be re-rendered without the
 	// 1.13-only SettingTab.update().
 	private modelRowRefreshers: Partial<Record<ModelSettingKey, () => void>> = {};
+	// In-place refresher for the "Thinking effort" row, registered by the 1.13+
+	// render() path. The chat model's capabilities gate this control, so it is
+	// rebuilt alongside the chat model row when the model or model list changes.
+	private thinkingEffortRefresher: (() => void) | null = null;
 	// True once the 1.13+ getSettingDefinitions() render path has run, so the
 	// async model-list refresh rebuilds the rows in place instead of using the
 	// legacy imperative refresh().
@@ -77,12 +81,15 @@ export class PorygonSettingTab extends PluginSettingTab {
 						name: "Thinking effort",
 						desc: "How much the model reasons before answering.",
 						aliases: ["reasoning"],
-						control: {
-							key: "thinkingEffort",
-							type: "dropdown",
-							options: { off: "Off", low: "Low", medium: "Medium", high: "High" },
+						// The chat model's capabilities gate this control (a non-thinking
+						// model forces it off), and that pin logic is imperative, so the
+						// row can't be a static control: on 1.13+ it is a render() hook
+						// that rebuilds the row in place.
+						render: (setting) => {
+							this.declarativeUi = true;
+							this.renderThinkingEffortRow(setting);
 						},
-					},
+					} satisfies SettingDefinition,
 					{
 						name: "Embeddings model",
 						desc: "Model used for semantic search.",
@@ -215,6 +222,9 @@ export class PorygonSettingTab extends PluginSettingTab {
 			for (const refresh of Object.values(this.modelRowRefreshers)) {
 				refresh?.();
 			}
+			// The chat model's capabilities gate the thinking-effort control, so
+			// rebuild it too whenever the model list refreshes.
+			this.thinkingEffortRefresher?.();
 		} else {
 			this.refresh();
 		}
@@ -229,6 +239,11 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 		if (this.declarativeUi) {
 			this.modelRowRefreshers[key]?.();
+			// The chat model's capabilities gate the thinking-effort control, so
+			// rebuild it too when the chat model changes.
+			if (key === "ollamaChatModel") {
+				this.thinkingEffortRefresher?.();
+			}
 		} else {
 			this.refresh();
 		}
@@ -526,7 +541,31 @@ export class PorygonSettingTab extends PluginSettingTab {
 		}
 	}
 
+	// Legacy imperative display() path: create the row, then delegate to the
+	// shared builder so this and the 1.13+ render() path run the same pin logic.
 	private renderThinkingEffort(containerEl: HTMLElement): void {
+		const setting = new Setting(containerEl)
+			.setName("Thinking effort")
+			.setDesc("How much the model reasons before answering.");
+		this.buildThinkingEffortRow(setting);
+	}
+
+	// 1.13+ getSettingDefinitions() render() path entry: keeps a handle on the row
+	// so the async model list and chat-model changes can rebuild it in place, since
+	// the declarative tab can't be re-rendered without the 1.13-only update().
+	private renderThinkingEffortRow(setting: Setting): void {
+		if (this.declarativeUi) {
+			this.thinkingEffortRefresher = () => this.buildThinkingEffortRow(setting);
+		}
+		this.buildThinkingEffortRow(setting);
+	}
+
+	// Shared "Thinking effort" builder used by both the legacy imperative path and
+	// the 1.13+ render() path. Idempotent: it clears any prior control from a
+	// previous build before re-adding, so the 1.13+ in-place refresher can run it
+	// again on the same row without stacking controls.
+	private buildThinkingEffortRow(setting: Setting): void {
+		setting.controlEl.empty();
 		const model = this.plugin.settings.ollamaChatModel;
 		const canThink = model ? (this.modelCapabilities[model]?.includes("thinking") ?? false) : false;
 
@@ -547,21 +586,18 @@ export class PorygonSettingTab extends PluginSettingTab {
 			return;
 		}
 
-		const effort = new Setting(containerEl)
-			.setName("Thinking effort")
-			.setDesc("How much the model reasons before answering.")
-			.addDropdown((dd) => {
-				dd.addOption("off", "Off");
-				dd.addOption("low", "Low");
-				dd.addOption("medium", "Medium");
-				dd.addOption("high", "High");
-				dd.setValue(this.plugin.settings.thinkingEffort);
-				dd.onChange((value) => {
-					this.plugin.settings.thinkingEffort = value as ThinkingEffort;
-					this.persist();
-				});
+		setting.addDropdown((dd) => {
+			dd.addOption("off", "Off");
+			dd.addOption("low", "Low");
+			dd.addOption("medium", "Medium");
+			dd.addOption("high", "High");
+			dd.setValue(this.plugin.settings.thinkingEffort);
+			dd.onChange((value) => {
+				this.plugin.settings.thinkingEffort = value as ThinkingEffort;
+				this.persist();
 			});
-		effort.setClass("porygon-settings-child");
+		});
+		setting.setClass("porygon-settings-child");
 	}
 
 	private renderCapabilityTags(setting: Setting, model: string): void {
