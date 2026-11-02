@@ -111,20 +111,23 @@
 
 .porygon-message-row.is-user .porygon-message-bubble {
 	flex-direction: row-reverse;
-	/* Solid fill first so engines without color-mix keep the pre-change
-	   visible accent bubble instead of an empty (transparent) one, then
-	   blend the accent toward transparent so the page background shows
-	   through (80% accent + 20% transparent by default), restoring contrast
-	   for --text-on-accent text on light-accent themes.
-	   We intentionally do NOT use rgba(var(--interactive-accent-rgb), …):
-	   that var is only provided by some themes on a scoped selector, so under
-	   e.g. AnuPpuccin it can be undefined at the bubble and the whole
-	   background declaration gets dropped (fully transparent, tunability lost).
+	/* Solid fill first so engines without color-mix keep a visible bubble,
+	   then blend the accent toward transparent (50% accent + 50% transparent by
+	   default) so the page background shows through.
+	   We intentionally do NOT use rgba(var(--interactive-accent-rgb), …): that
+	   var is only provided by some themes on a scoped selector, so under e.g.
+	   AnuPpuccin it can be undefined at the bubble and the whole background
+	   declaration gets dropped (fully transparent, no opacity tuning).
 	   --interactive-accent is always valid (Obsidian core guarantees it).
-	   Tune --porygon-user-bubble-opacity (a percentage): 95% ≈ solid, 20% faint. */
+	   Text uses --text-normal — the same color the Porygon (response) text uses:
+	   it is near-black on light themes and near-white on dark themes, so user
+	   text stays legible on the translucent fill. For a literal black on light
+	   themes, add a `.theme-light .porygon-message-row.is-user .porygon-message-bubble`
+	   override with `color: #000`.
+	   Tune --porygon-user-bubble-opacity (a percentage): 100% ≈ solid, 20% faint. */
 	background: var(--interactive-accent);
-	background: color-mix(in srgb, var(--interactive-accent) var(--porygon-user-bubble-opacity, 80%), transparent);
-	color: var(--text-on-accent);
+	background: color-mix(in srgb, var(--interactive-accent) var(--porygon-user-bubble-opacity, 50%), transparent);
+	color: var(--text-normal);
 	-webkit-user-select: text;
 	user-select: text;
 }
