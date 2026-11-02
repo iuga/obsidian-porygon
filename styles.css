@@ -111,12 +111,19 @@
 
 .porygon-message-row.is-user .porygon-message-bubble {
 	flex-direction: row-reverse;
-	/* 80% solid accent + 20% see-through to the page background darkens the
-	   fill on most themes, keeping --text-on-accent text legible. The solid
-	   fill over a dark background crushed contrast; blending with the
-	   background restores it. Override --porygon-user-bubble-opacity to taste
-	   (1.0 = the previous solid look, 0.6 = more contrast). */
-	background: rgba(var(--interactive-accent-rgb), var(--porygon-user-bubble-opacity, 0.8));
+	/* Solid fill first so engines without color-mix keep the pre-change
+	   visible accent bubble instead of an empty (transparent) one, then
+	   blend the accent toward transparent so the page background shows
+	   through (80% accent + 20% transparent by default), restoring contrast
+	   for --text-on-accent text on light-accent themes.
+	   We intentionally do NOT use rgba(var(--interactive-accent-rgb), …):
+	   that var is only provided by some themes on a scoped selector, so under
+	   e.g. AnuPpuccin it can be undefined at the bubble and the whole
+	   background declaration gets dropped (fully transparent, tunability lost).
+	   --interactive-accent is always valid (Obsidian core guarantees it).
+	   Tune --porygon-user-bubble-opacity (a percentage): 95% ≈ solid, 20% faint. */
+	background: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) var(--porygon-user-bubble-opacity, 80%), transparent);
 	color: var(--text-on-accent);
 	-webkit-user-select: text;
 	user-select: text;
