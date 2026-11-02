@@ -111,7 +111,12 @@
 
 .porygon-message-row.is-user .porygon-message-bubble {
 	flex-direction: row-reverse;
-	background: var(--interactive-accent);
+	/* 80% solid accent + 20% see-through to the page background darkens the
+	   fill on most themes, keeping --text-on-accent text legible. The solid
+	   fill over a dark background crushed contrast; blending with the
+	   background restores it. Override --porygon-user-bubble-opacity to taste
+	   (1.0 = the previous solid look, 0.6 = more contrast). */
+	background: rgba(var(--interactive-accent-rgb), var(--porygon-user-bubble-opacity, 0.8));
 	color: var(--text-on-accent);
 	-webkit-user-select: text;
 	user-select: text;
