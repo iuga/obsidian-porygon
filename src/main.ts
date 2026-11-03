@@ -1,5 +1,6 @@
 import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
+import { migrateLegacySessionFiles } from "./session-migration";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
 import { PorygonSettingTab } from "./settings/settings-tab";
@@ -56,6 +57,9 @@ export default class PorygonPlugin extends Plugin {
 			this.registerSkillEvents();
 			void this.skills.initialize().catch((error) => {
 				console.error("[Porygon Skills] failed to initialize", error);
+			});
+			void migrateLegacySessionFiles(this.app, this.settings.porygonFolder).catch((error) => {
+				console.error("[Porygon] failed to migrate legacy session files", error);
 			});
 			void this.ragIndexer.reconcile();
 			void this.refreshChatModelContextLength();

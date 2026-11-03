@@ -120,7 +120,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume/Load/Open a saved session.", icon: "messages-square" },
 ];
 
-const PORYGON_SESSIONS_SUBFOLDER = "sessions";
+export const PORYGON_SESSIONS_SUBFOLDER = "sessions";
+// Sessions are canonicalized to the `.session` suffix so they can be registered
+// as a first-class FileView (issue #45). Legacy sessions stored as `.md` stay
+// readable so /resume keeps working until the one-time migration runs.
+export const PORYGON_SESSION_EXTENSION = "session";
+export const LEGACY_SESSION_EXTENSION = "md";
 const PORYGON_FRONTMATTER_DELIMITER = "---";
 const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? • / for commands • @ for mentions";
 const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
@@ -1323,7 +1328,11 @@ export class PorygonView extends ItemView {
 		}
 
 		return folder.children
-			.filter((child): child is TFile => child instanceof TFile && child.extension === "md")
+			.filter(
+				(child): child is TFile =>
+					child instanceof TFile &&
+					(child.extension === PORYGON_SESSION_EXTENSION || child.extension === LEGACY_SESSION_EXTENSION),
+			)
 			.sort((first, second) => second.stat.mtime - first.stat.mtime);
 	}
 
@@ -2065,7 +2074,7 @@ export class PorygonView extends ItemView {
 			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
 			this.currentSessionTitle = title;
 			const sessionsFolder = this.getSessionsFolder();
-			const filename = `${sessionsFolder}/${sessionId}.md`;
+			const filename = `${sessionsFolder}/${sessionId}.${PORYGON_SESSION_EXTENSION}`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
 			await ensureFolderExists(this.plugin.app, sessionsFolder);
 			await this.writeSessionFile(filename, content);
