@@ -1,5 +1,6 @@
-import { Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
-import { PorygonView, PORYGON_VIEW_TYPE } from "./view";
+import { App, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { PORYGON_SESSION_EXTENSION, PORYGON_VIEW_TYPE, PorygonView } from "./view";
+import { migrateLegacySessionFiles } from "./session-migration";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
 import { PorygonSettingTab } from "./settings/settings-tab";
@@ -8,6 +9,28 @@ import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
 import { getActiveProvider } from "./providers";
 import { initLangGraphAsyncContext } from "./agent/context";
+
+// Route a double-clicked .session file to the single Porygon view: resume the
+// conversation into the already-open view, or open the sidebar view with the
+// session preloaded. Enforces "one Porygon view, always."
+async function openSessionFile(app: App, file: TFile): Promise<void> {
+	const existing = app.workspace.getLeavesOfType(PORYGON_VIEW_TYPE)[0];
+	if (existing) {
+		await app.workspace.revealLeaf(existing);
+		if (existing.view instanceof PorygonView) {
+			void existing.view.resumeSessionFile(file);
+		}
+		return;
+	}
+
+	const leaf = app.workspace.getRightLeaf(false);
+	if (!leaf) {
+		return;
+	}
+
+	await leaf.setViewState({ type: PORYGON_VIEW_TYPE, active: true, state: { file: file.path } });
+	app.workspace.rightSplit.expand();
+}
 
 export default class PorygonPlugin extends Plugin {
 	settings!: PorygonPluginSettings;
@@ -41,10 +64,31 @@ export default class PorygonPlugin extends Plugin {
 			PORYGON_VIEW_TYPE,
 			(leaf: WorkspaceLeaf) => new PorygonView(leaf, this)
 		);
+		// Register the .session extension so saved conversations show up in the
+		// file explorer and double-clicking one opens the Porygon view. Without
+		// this Obsidian treats .session as an unrecognized extension and hides it.
+		this.registerExtensions([PORYGON_SESSION_EXTENSION], PORYGON_VIEW_TYPE);
 		this.addSettingTab(new PorygonSettingTab(this));
 
 		this.addRibbonIcon("origami", "Porygon", () => {
 			void this.activateView();
+		});
+
+		// Route double-clicks on .session files to the single sidebar view.
+		// Obsidian would otherwise open the file in its own tab (the view type
+		// isn't a FileView), so intercept openFile and hand the session off to
+		// openSessionFile instead. Restored on unload via register().
+		const leafProto = WorkspaceLeaf.prototype as { openFile: WorkspaceLeaf["openFile"] };
+		const originalOpenFile = leafProto.openFile;
+		const app = this.app;
+		WorkspaceLeaf.prototype.openFile = async function (file, openState) {
+			if (file instanceof TFile && file.extension === PORYGON_SESSION_EXTENSION) {
+				return openSessionFile(app, file);
+			}
+			return originalOpenFile.call(this, file, openState);
+		};
+		this.register(() => {
+			WorkspaceLeaf.prototype.openFile = originalOpenFile;
 		});
 
 		this.app.workspace.onLayoutReady(() => {
@@ -57,6 +101,9 @@ export default class PorygonPlugin extends Plugin {
 			void this.skills.initialize().catch((error) => {
 				console.error("[Porygon Skills] failed to initialize", error);
 			});
+			void migrateLegacySessionFiles(this.app, this.settings.porygonFolder).catch((error) => {
+				console.error("[Porygon] failed to migrate legacy session files", error);
+			});
 			void this.ragIndexer.reconcile();
 			void this.refreshChatModelContextLength();
 		});
@@ -65,6 +112,9 @@ export default class PorygonPlugin extends Plugin {
 	onunload(): void {
 		this.ragIndexer?.dispose();
 		void this.ragStore?.close();
+		// The .session extension registered via Plugin.registerExtensions is torn
+		// down automatically by the component lifecycle (registerExtensions
+		// registers its own cleanup), so there is nothing to clean up here.
 	}
 
 	async activateView(): Promise<void> {

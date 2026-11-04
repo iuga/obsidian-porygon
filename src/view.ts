@@ -120,7 +120,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
 	{ id: "resume", label: "Resume", syntax: "/resume", description: "Resume/Load/Open a saved session.", icon: "messages-square" },
 ];
 
-const PORYGON_SESSIONS_SUBFOLDER = "sessions";
+export const PORYGON_SESSIONS_SUBFOLDER = "sessions";
+// Sessions are canonicalized to the `.session` suffix so they can be registered
+// as a first-class FileView (issue #45). Legacy sessions stored as `.md` stay
+// readable so /resume keeps working until the one-time migration runs.
+export const PORYGON_SESSION_EXTENSION = "session";
+export const LEGACY_SESSION_EXTENSION = "md";
 const PORYGON_FRONTMATTER_DELIMITER = "---";
 const MESSAGE_INPUT_PLACEHOLDER = "How can I help you today? • / for commands • @ for mentions";
 const EMPTY_CHAT_QUOTES: [string, ...string[]] = [
@@ -204,6 +209,15 @@ export class PorygonView extends ItemView {
 		this.screen = this.getInitialScreen();
 		await this.loadModelsForModelStep();
 		this.render();
+		// If this leaf was opened by double-clicking a .session file, Obsidian
+		// stashes its path in the leaf's view state (state.file). Load that
+		// conversation now that the UI is rendered. Ribbon/command opens pass no
+		// file, so this is a no-op for them.
+		const opened = this.leaf.getViewState().state?.file;
+		const openedFile = typeof opened === "string" ? this.plugin.app.vault.getAbstractFileByPath(opened) : opened;
+		if (openedFile instanceof TFile && this.isSessionFile(openedFile)) {
+			await this.loadSession(openedFile);
+		}
 	}
 
 	onClose(): Promise<void> {
@@ -1316,6 +1330,18 @@ export class PorygonView extends ItemView {
 		return normalizePath(`${this.plugin.settings.porygonFolder}/${PORYGON_SESSIONS_SUBFOLDER}`);
 	}
 
+	// A file is a resolvable session if it uses the canonical .session suffix, or
+	// is a legacy .md file that still lives in the sessions folder.
+	private isSessionFile(file: TFile): boolean {
+		if (file.extension === PORYGON_SESSION_EXTENSION) {
+			return true;
+		}
+		return (
+			file.extension === LEGACY_SESSION_EXTENSION &&
+			normalizePath(file.parent?.path ?? "").startsWith(this.getSessionsFolder())
+		);
+	}
+
 	private getSessionFiles(): TFile[] {
 		const folder = this.plugin.app.vault.getAbstractFileByPath(this.getSessionsFolder());
 		if (!(folder instanceof TFolder)) {
@@ -1323,7 +1349,11 @@ export class PorygonView extends ItemView {
 		}
 
 		return folder.children
-			.filter((child): child is TFile => child instanceof TFile && child.extension === "md")
+			.filter(
+				(child): child is TFile =>
+					child instanceof TFile &&
+					(child.extension === PORYGON_SESSION_EXTENSION || child.extension === LEGACY_SESSION_EXTENSION),
+			)
 			.sort((first, second) => second.stat.mtime - first.stat.mtime);
 	}
 
@@ -2065,7 +2095,7 @@ export class PorygonView extends ItemView {
 			const title = await this.getTitleForSave(visibleMessages).catch(() => "");
 			this.currentSessionTitle = title;
 			const sessionsFolder = this.getSessionsFolder();
-			const filename = `${sessionsFolder}/${sessionId}.md`;
+			const filename = `${sessionsFolder}/${sessionId}.${PORYGON_SESSION_EXTENSION}`;
 			const content = this.formatSessionForSave(sessionId, title, visibleMessages);
 			await ensureFolderExists(this.plugin.app, sessionsFolder);
 			await this.writeSessionFile(filename, content);
@@ -2209,6 +2239,13 @@ export class PorygonView extends ItemView {
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 			this.renderMessages();
 		}
+	}
+
+	// Public entrypoint used when a .session file is opened (double-click routed
+	// through the plugin's openSessionFile, or Obsidian opening the registered
+	// extension). Loads and renders the saved conversation.
+	async resumeSessionFile(file: TFile): Promise<void> {
+		await this.loadSession(file);
 	}
 
 	private parseSession(content: string): ParsedSession {
