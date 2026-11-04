@@ -209,6 +209,15 @@ export class PorygonView extends ItemView {
 		this.screen = this.getInitialScreen();
 		await this.loadModelsForModelStep();
 		this.render();
+		// If this leaf was opened by double-clicking a .session file, Obsidian
+		// stashes its path in the leaf's view state (state.file). Load that
+		// conversation now that the UI is rendered. Ribbon/command opens pass no
+		// file, so this is a no-op for them.
+		const opened = this.leaf.getViewState().state?.file;
+		const openedFile = typeof opened === "string" ? this.plugin.app.vault.getAbstractFileByPath(opened) : opened;
+		if (openedFile instanceof TFile && this.isSessionFile(openedFile)) {
+			await this.loadSession(openedFile);
+		}
 	}
 
 	onClose(): Promise<void> {
@@ -1321,6 +1330,18 @@ export class PorygonView extends ItemView {
 		return normalizePath(`${this.plugin.settings.porygonFolder}/${PORYGON_SESSIONS_SUBFOLDER}`);
 	}
 
+	// A file is a resolvable session if it uses the canonical .session suffix, or
+	// is a legacy .md file that still lives in the sessions folder.
+	private isSessionFile(file: TFile): boolean {
+		if (file.extension === PORYGON_SESSION_EXTENSION) {
+			return true;
+		}
+		return (
+			file.extension === LEGACY_SESSION_EXTENSION &&
+			normalizePath(file.parent?.path ?? "").startsWith(this.getSessionsFolder())
+		);
+	}
+
 	private getSessionFiles(): TFile[] {
 		const folder = this.plugin.app.vault.getAbstractFileByPath(this.getSessionsFolder());
 		if (!(folder instanceof TFolder)) {
@@ -2218,6 +2239,13 @@ export class PorygonView extends ItemView {
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 			this.renderMessages();
 		}
+	}
+
+	// Public entrypoint used when a .session file is opened (double-click routed
+	// through the plugin's openSessionFile, or Obsidian opening the registered
+	// extension). Loads and renders the saved conversation.
+	async resumeSessionFile(file: TFile): Promise<void> {
+		await this.loadSession(file);
 	}
 
 	private parseSession(content: string): ParsedSession {
