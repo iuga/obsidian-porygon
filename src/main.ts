@@ -112,15 +112,9 @@ export default class PorygonPlugin extends Plugin {
 	onunload(): void {
 		this.ragIndexer?.dispose();
 		void this.ragStore?.close();
-		// registerExtensions is not torn down by the component lifecycle, so a
-		// stale registration would throw "already registered extension" on the
-		// next enable. Clean it via the internal view registry (optional-chained
-		// since it's an undocumented API that could change upstream).
-		(
-			this.app as typeof this.app & {
-				viewRegistry?: { unregisterExtensions?: (extensions: string[]) => void };
-			}
-		).viewRegistry?.unregisterExtensions?.([PORYGON_SESSION_EXTENSION]);
+		// The .session extension registered via Plugin.registerExtensions is torn
+		// down automatically by the component lifecycle (registerExtensions
+		// registers its own cleanup), so there is nothing to clean up here.
 	}
 
 	async activateView(): Promise<void> {
