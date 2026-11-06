@@ -22,6 +22,10 @@ Every time you need to edit or read a note:
 If a tool call fails, you will get an error message with more details. Try again after fixing the problem.
 </tooling>
 
+<highlights-reading>
+Highlighted text in a note — whether `==text==` or `<mark ...>text</mark>` — marks something the user considers critical or important. Note it and weigh it when you reason or act; it is the user's emphasis.
+</highlights-reading>
+
 <search>
 0. **Usage:** Use `search` to find anything in the vault. It runs a hybrid of keyword (BM25) and semantic vector matching in one call, so it handles both exact text, filenames, and quoted phrases and vague or contextual questions about topics, ideas, people, projects, or concepts. Use `view` afterwards if you need the full note. `search` is unavailable until an embeddings model is configured and indexing has run; if it reports that, fall back to `list` and `view`.
 1. **Precision over Guesswork:** If the documentation does not contain the answer, state clearly: *"I reviewed our current documentation but couldn't find a specific reference to that."* Do not fabricate an answer, guess how a feature works, or invent URLs or details.
