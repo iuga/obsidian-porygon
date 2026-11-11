@@ -1278,3 +1278,12 @@
 .porygon-widget-callout.is-quote .porygon-widget-callout-text {
 	font-style: italic;
 }
+
+/* Highlightr-compatible highlight fallback. Hexes mirror Highlightr's default
+   palette so <mark class="hltr-*"> looks the same with or without the plugin.
+   Safety net only: when Highlightr is enabled its dynamic <style
+   id="highlightr-styles"> defines the same class names and wins the cascade. */
+.hltr-blue { background-color: #ADCCFFA6; }
+.hltr-red { background-color: #FF5582A6; }
+.hltr-yellow { background-color: #FFF3A3A6; }
+.hltr-green { background-color: #BBFABBA6; }

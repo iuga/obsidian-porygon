@@ -81,11 +81,21 @@ export interface LocalAgentStreamHandlers {
 
 const MAX_INTERRUPT_RESUME_CYCLES = 16;
 
+// Highlightr (#53) is detected through Obsidian's plugin manager. `app.plugins`
+// is a runtime-only surface the public obsidian types don't declare, so we
+// reach it through a narrow cast. `enabledPlugins` is a Set<string> of enabled
+// plugin ids. Falls back to false when the surface or the set is unavailable.
+function isHighlightrEnabled(app: App): boolean {
+	const plugins = (app as unknown as { plugins?: { enabledPlugins?: Set<string> } }).plugins;
+	return plugins?.enabledPlugins?.has("highlightr-plugin") ?? false;
+}
+
 export async function streamLocalAgent(options: LocalAgentOptions, handlers: LocalAgentStreamHandlers = {}): Promise<LocalAgentResponse> {
 	currentSystemPrompt.value = buildSystemPrompt({
 		skills: options.skills,
 		memoriesStore: options.memoriesStore,
 		personalPrompt: options.settings.personalPrompt,
+		highlightrDetected: isHighlightrEnabled(options.app),
 	});
 
 	if (!agent) {
