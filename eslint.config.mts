@@ -13,7 +13,8 @@ export default tseslint.config(
 				projectService: {
 					allowDefaultProject: [
 						'eslint.config.js',
-						'manifest.json'
+						'manifest.json',
+						'scripts/run-tests.mjs'
 					]
 				},
 				tsconfigRootDir: import.meta.dirname,

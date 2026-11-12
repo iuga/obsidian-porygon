@@ -7,6 +7,7 @@ import { PorygonSettingTab } from "./settings/settings-tab";
 import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
 import { resetAgent } from "./agent/agent";
+import { resetToolLocks } from "./agent/tool-locks";
 import { getActiveProvider } from "./providers";
 import { initLangGraphAsyncContext } from "./agent/context";
 
@@ -112,6 +113,10 @@ export default class PorygonPlugin extends Plugin {
 	onunload(): void {
 		this.ragIndexer?.dispose();
 		void this.ragStore?.close();
+		// Tool locks are module-level so an agent rebuild keeps the same lock set.
+		// On unload no run can still be in flight, so dropping them prevents a
+		// stuck key from blocking tool calls after the plugin is re-enabled.
+		resetToolLocks();
 		// The .session extension registered via Plugin.registerExtensions is torn
 		// down automatically by the component lifecycle (registerExtensions
 		// registers its own cleanup), so there is nothing to clean up here.

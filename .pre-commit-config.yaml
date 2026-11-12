@@ -14,3 +14,10 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
+
+      - id: test
+        name: npm test
+        entry: npm test
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

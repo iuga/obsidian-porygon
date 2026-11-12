@@ -9,6 +9,7 @@ import { MemoriesStore } from "./memories";
 import { buildSystemPrompt } from "./prompt";
 import { SkillsService } from "./skills";
 import { AgentLike, AgentTokenUsage, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, readUsageFromState, toLangChainMessage, ToolIntentTracker } from "./streaming";
+import { createToolConcurrencyMiddleware } from "./tool-concurrency";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
@@ -105,8 +106,18 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
 			middleware: [
 				dynamicSystemPromptMiddleware(() => new SystemMessage(currentSystemPrompt.value)),
+				createToolConcurrencyMiddleware(options.app),
 			],
 			checkpointer: agentCheckpointer,
+			// Pinned deliberately. "v2" is the library default and dispatches each
+			// tool call as its own Send task, which is what gives per-call
+			// checkpointing and per-call interrupt() support. The approval and
+			// ask_user flows depend on that: "v1" runs every tool call of one
+			// response inside a single task via Promise.all, so tool-level
+			// interrupts share one task instead of pausing individually.
+			// Concurrency itself comes from those Send tasks, not from the lock
+			// middleware; the middleware only serializes conflicting calls.
+			version: "v2",
 		});
 	}
 	const activeAgent = agent;
