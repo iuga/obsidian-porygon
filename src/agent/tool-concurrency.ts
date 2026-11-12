@@ -1,3 +1,4 @@
+import { isGraphBubbleUp } from "@langchain/langgraph";
 import { createMiddleware } from "langchain";
 import { App } from "obsidian";
 import {
@@ -14,6 +15,11 @@ const targetTails = new Map<string, Promise<void>>();
 
 const MEMORY_TARGET_KEY = "memory:__store__";
 const VAULT_TARGET_PREFIX = "vault:";
+
+function logToolTiming(message: string): void {
+	// Temporary trace for verifying concurrent tool execution.
+	console.debug(message);
+}
 
 function asNonEmptyString(value: unknown): string | null {
 	if (typeof value !== "string") {
@@ -108,12 +114,30 @@ export function createToolConcurrencyMiddleware(app: App) {
 	return createMiddleware({
 		name: "PorygonToolTargetSerialization",
 		wrapToolCall: async (request, handler) => {
-			const targets = getToolCallTargets(app, request.toolCall.name, request.toolCall.args ?? {});
-			if (targets.length === 0) {
-				return handler(request);
-			}
+			const { name, id } = request.toolCall;
+			const targets = getToolCallTargets(app, name, request.toolCall.args ?? {});
+			const requestedAt = performance.now();
+			const execute = async () => {
+				const startedAt = performance.now();
+				const waitedMs = Math.round(startedAt - requestedAt);
+				const targetSummary = targets.length > 0 ? ` targets=[${targets.join(", ")}]` : "";
+				logToolTiming(
+					`[Porygon Tools] start ${name} id=${id}${targetSummary}${waitedMs > 0 ? ` waited=${waitedMs}ms` : ""}`,
+				);
 
-			return withTargetLocks(targets, () => handler(request));
+				let status = "ok";
+				try {
+					return await handler(request);
+				} catch (error) {
+					status = isGraphBubbleUp(error) ? "interrupted" : "error";
+					throw error;
+				} finally {
+					const durationMs = Math.round(performance.now() - startedAt);
+					logToolTiming(`[Porygon Tools] finish ${name} id=${id} status=${status} duration=${durationMs}ms`);
+				}
+			};
+
+			return targets.length === 0 ? execute() : withTargetLocks(targets, execute);
 		},
 	});
 }
