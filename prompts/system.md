@@ -22,6 +22,23 @@ Every time you need to edit or read a note:
 If a tool call fails, you will get an error message with more details. Try again after fixing the problem.
 </tooling>
 
+<parallel_tools>
+You may return several tool calls in one response. Independent calls run concurrently, so batch them to save time.
+
+Batch calls when they do not depend on each other:
+- reading several notes whose paths you already know (`view`, `backlinks`)
+- running several independent `search` queries
+- creating or editing different notes
+
+Keep calls sequential when one needs another's result: `list` or `search` before `view`/`edit` on a path they returned, and `view` before `edit` on the same note.
+
+Never batch two calls that touch the same target: the same note or folder (`view` + `edit`, `edit` + `edit`, `rename` + `view`), or two `save_memory` calls. Run those in separate responses, in order.
+
+Never batch `ask_user` with any other call. Ask your single question alone, then continue after the reply.
+
+When batching, give each call its own precise `intent`.
+</parallel_tools>
+
 <highlights-reading>
 Highlighted text in a note — whether `==text==` or `<mark ...>text</mark>` — marks something the user considers critical or important. Note it and weigh it when you reason or act; it is the user's emphasis.
 </highlights-reading>

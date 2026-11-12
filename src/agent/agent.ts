@@ -9,6 +9,7 @@ import { MemoriesStore } from "./memories";
 import { buildSystemPrompt } from "./prompt";
 import { SkillsService } from "./skills";
 import { AgentLike, AgentTokenUsage, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, readUsageFromState, toLangChainMessage, ToolIntentTracker } from "./streaming";
+import { createToolConcurrencyMiddleware } from "./tool-concurrency";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
@@ -105,8 +106,12 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			tools: createAgentTools(options.app, options.semanticSearch, options.getIndexProgress, options.skills, options.getYolo, options.memoriesStore),
 			middleware: [
 				dynamicSystemPromptMiddleware(() => new SystemMessage(currentSystemPrompt.value)),
+				createToolConcurrencyMiddleware(options.app),
 			],
 			checkpointer: agentCheckpointer,
+			// v2 dispatches each tool call as its own Send task, which gives
+			// independent calls real concurrency and per-call checkpointing.
+			version: "v2",
 		});
 	}
 	const activeAgent = agent;
