@@ -109,8 +109,14 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 				createToolConcurrencyMiddleware(options.app),
 			],
 			checkpointer: agentCheckpointer,
-			// v2 dispatches each tool call as its own Send task, which gives
-			// independent calls real concurrency and per-call checkpointing.
+			// Pinned deliberately. "v2" is the library default and dispatches each
+			// tool call as its own Send task, which is what gives per-call
+			// checkpointing and per-call interrupt() support. The approval and
+			// ask_user flows depend on that: "v1" runs every tool call of one
+			// response inside a single task via Promise.all, so tool-level
+			// interrupts share one task instead of pausing individually.
+			// Concurrency itself comes from those Send tasks, not from the lock
+			// middleware; the middleware only serializes conflicting calls.
 			version: "v2",
 		});
 	}

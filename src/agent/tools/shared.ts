@@ -114,11 +114,19 @@ export function stripWikiLinkSyntax(link: string): string {
 	return trimmedLink;
 }
 
-export function resolveMarkdownFile(app: App, linkToMarkdownfile: string): TFile | null {
-	const normalizedLink = stripWikiLinkSyntax(linkToMarkdownfile).replace(/\\/g, "/");
+// Strips wikilink brackets, backslashes, `#subpath` and `|alias` so a note
+// reference becomes a plain vault-relative path. Shared by link resolution and
+// by the tool-lock key derivation so both always agree on what "same note"
+// means.
+export function normalizeNoteReference(link: string): string {
+	const normalizedLink = stripWikiLinkSyntax(link).replace(/\\/g, "/");
 	const withoutSubpath = normalizedLink.split("#")[0] ?? normalizedLink;
 	const withoutAlias = withoutSubpath.split("|")[0] ?? withoutSubpath;
-	const trimmedPath = withoutAlias.trim();
+	return withoutAlias.trim();
+}
+
+export function resolveMarkdownFile(app: App, linkToMarkdownfile: string): TFile | null {
+	const trimmedPath = normalizeNoteReference(linkToMarkdownfile);
 	const pathCandidates = trimmedPath.endsWith(".md") ? [trimmedPath] : [trimmedPath, `${trimmedPath}.md`];
 
 	for (const pathCandidate of pathCandidates) {
