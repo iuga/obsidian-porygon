@@ -1,6 +1,7 @@
 import { isGraphBubbleUp } from "@langchain/langgraph";
 import { createMiddleware } from "langchain";
 import type { App } from "obsidian";
+import { getToolExecutionObserver, type ToolExecutionEvent } from "./tool-events";
 import { withToolLocks } from "./tool-locks";
 import { getToolCallTargets, type VaultTargetLookup } from "./tool-targets";
 import { normalizeMarkdownPath, normalizeNoteReference, resolveMarkdownFile } from "./tools/shared";
@@ -8,6 +9,12 @@ import { normalizeMarkdownPath, normalizeNoteReference, resolveMarkdownFile } fr
 function logToolTiming(message: string): void {
 	// Temporary trace for verifying concurrent tool execution.
 	console.debug(message);
+}
+
+// Resolved per event, never captured: the middleware is built once with the
+// cached agent, while the observer is installed fresh by each turn.
+function emitToolExecution(event: ToolExecutionEvent): void {
+	getToolExecutionObserver()?.onToolExecution(event);
 }
 
 /**
@@ -50,7 +57,11 @@ export function createToolConcurrencyMiddleware(app: App) {
 					`[Porygon Tools] start ${name} id=${id}${targetSummary}${waitedMs > 0 ? ` waited=${waitedMs}ms` : ""}`,
 				);
 
-				let status = "ok";
+				// Timer starts here, after tool-lock acquisition, so queue wait
+				// is never counted as execution time.
+				emitToolExecution({ id: id ?? "", name, phase: "start", at: startedAt });
+
+				let status: "ok" | "error" | "interrupted" = "ok";
 				try {
 					return await handler(request);
 				} catch (error) {
@@ -59,6 +70,13 @@ export function createToolConcurrencyMiddleware(app: App) {
 				} finally {
 					const durationMs = Math.round(performance.now() - startedAt);
 					logToolTiming(`[Porygon Tools] finish ${name} id=${id} status=${status} duration=${durationMs}ms`);
+					if (status === "interrupted") {
+						// Paused for approval / ask_user. The call re-runs from the
+						// top on resume, which emits a fresh `start`.
+						emitToolExecution({ id: id ?? "", name, phase: "interrupted", at: performance.now() });
+					} else {
+						emitToolExecution({ id: id ?? "", name, phase: "finish", at: performance.now(), durationMs });
+					}
 				}
 			};
 

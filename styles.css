@@ -320,8 +320,51 @@
 	word-break: break-word;
 }
 
+/* Inner row keeps the native list marker on the <li> while aligning the
+   intent text and the duration on one line. */
+.porygon-tools-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-2-2);
+}
+
 .porygon-tools-intent {
+	flex: 1 1 auto;
+	min-width: 0;
 	color: var(--text-muted);
+}
+
+.porygon-tools-duration {
+	flex: 0 0 auto;
+	margin-left: auto;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.porygon-tools-item.is-executing .porygon-tools-intent {
+	animation: porygon-tool-glow 2s ease-in-out infinite;
+}
+
+@keyframes porygon-tool-glow {
+	0%,
+	100% {
+		color: var(--text-muted);
+		text-shadow: 0 0 0 transparent;
+	}
+
+	50% {
+		color: var(--text-normal);
+		text-shadow: 0 0 8px var(--interactive-accent);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.porygon-tools-item.is-executing .porygon-tools-intent {
+		animation: none;
+		color: var(--interactive-accent);
+	}
 }
 
 .porygon-chat-warning {

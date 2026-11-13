@@ -10,6 +10,7 @@ import { buildSystemPrompt } from "./prompt";
 import { SkillsService } from "./skills";
 import { AgentLike, AgentTokenUsage, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, readUsageFromState, toLangChainMessage, ToolIntentTracker } from "./streaming";
 import { createToolConcurrencyMiddleware } from "./tool-concurrency";
+import { clearToolExecutionObserver, setToolExecutionObserver, type ToolExecutionEvent, type ToolExecutionTimingState } from "./tool-events";
 import { AskUserInterruptPayload, createAgentTools } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
@@ -23,9 +24,7 @@ export interface AgentChatMessage {
 	content: string;
 }
 
-export interface AgentToolCallIntent {
-	id: string;
-	name: string;
+export interface AgentToolCallIntent extends ToolExecutionTimingState {
 	intent: string;
 }
 
@@ -76,6 +75,7 @@ export interface LocalAgentStreamHandlers {
 	onContentDelta?: (delta: string) => void;
 	onThinkingDelta?: (delta: string) => void;
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
+	onToolExecution?: (event: ToolExecutionEvent) => void;
 	onUsage?: (usage: AgentTokenUsage) => void;
 	onAskUser?: (payload: AskUserInterruptPayload) => Promise<string> | string;
 }
@@ -128,40 +128,55 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 	const acc = createStreamAccumulator();
 	const tracker = new ToolIntentTracker();
 
-	let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
-	for (let cycle = 0; cycle < MAX_INTERRUPT_RESUME_CYCLES; cycle += 1) {
-		const stream = await activeAgent.stream(nextInput, config);
-		await consumeAgentStream(stream, tracker, acc, handlers);
-
-		const state = await (activeAgent as unknown as AgentLike).getState(config);
-
-		// The live `messages` stream drops the usage-bearing final chunk, so
-		// pull token counts from the checkpointed state after each pass and
-		// surface the freshest reading (input_tokens already includes the
-		// full prompt + history + tool results = context-window fill).
-		const usage = readUsageFromState(state);
-		if (usage) {
-			handlers.onUsage?.(usage);
-		}
-
-		const askPayloads = getPendingAskUserPayloads(state);
-		if (askPayloads.length === 0) {
-			return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents };
-		}
-
-		if (!handlers.onAskUser) {
-			throw new Error("Agent requested user input but no askUser handler was provided.");
-		}
-
-		// Resume each pending interrupt sequentially with the user's reply.
-		// LangGraph stores the resume map keyed by interrupt id; we collect
-		// them all so multiple interrupts in one turn don't get dropped.
-		const resumeMap: Record<string, string> = {};
-		for (const { id, payload } of askPayloads) {
-			resumeMap[id] = await handlers.onAskUser(payload);
-		}
-		nextInput = new Command({ resume: resumeMap });
+	// Execution events come from the tool middleware, not the message stream.
+	// Install a per-turn observer and always clear it, including when the
+	// caller aborts: a tool that ignores the abort may still finish later, and
+	// its event must not land on a superseded turn.
+	const toolObserver = handlers.onToolExecution ? { onToolExecution: handlers.onToolExecution } : null;
+	if (toolObserver) {
+		setToolExecutionObserver(toolObserver);
 	}
 
-	throw new Error(`Agent exceeded ${MAX_INTERRUPT_RESUME_CYCLES} interrupt/resume cycles in a single turn.`);
+	try {
+		let nextInput: { messages: BaseMessageLike[] } | Command = { messages: turnMessages };
+		for (let cycle = 0; cycle < MAX_INTERRUPT_RESUME_CYCLES; cycle += 1) {
+			const stream = await activeAgent.stream(nextInput, config);
+			await consumeAgentStream(stream, tracker, acc, handlers);
+
+			const state = await (activeAgent as unknown as AgentLike).getState(config);
+
+			// The live `messages` stream drops the usage-bearing final chunk, so
+			// pull token counts from the checkpointed state after each pass and
+			// surface the freshest reading (input_tokens already includes the
+			// full prompt + history + tool results = context-window fill).
+			const usage = readUsageFromState(state);
+			if (usage) {
+				handlers.onUsage?.(usage);
+			}
+
+			const askPayloads = getPendingAskUserPayloads(state);
+			if (askPayloads.length === 0) {
+				return { content: acc.content, thinking: acc.thinking, toolIntents: acc.toolIntents };
+			}
+
+			if (!handlers.onAskUser) {
+				throw new Error("Agent requested user input but no askUser handler was provided.");
+			}
+
+			// Resume each pending interrupt sequentially with the user's reply.
+			// LangGraph stores the resume map keyed by interrupt id; we collect
+			// them all so multiple interrupts in one turn don't get dropped.
+			const resumeMap: Record<string, string> = {};
+			for (const { id, payload } of askPayloads) {
+				resumeMap[id] = await handlers.onAskUser(payload);
+			}
+			nextInput = new Command({ resume: resumeMap });
+		}
+
+		throw new Error(`Agent exceeded ${MAX_INTERRUPT_RESUME_CYCLES} interrupt/resume cycles in a single turn.`);
+	} finally {
+		if (toolObserver) {
+			clearToolExecutionObserver(toolObserver);
+		}
+	}
 }
