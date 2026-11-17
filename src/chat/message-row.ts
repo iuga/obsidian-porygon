@@ -3,6 +3,7 @@ import type { AgentToolCallIntent } from "../agent/agent";
 import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
 import { formatToolDuration, formatToolElapsed } from "./tool-duration";
+import { getThinkingTitle, isThinkingExpanded } from "./thinking-state";
 import { parseMessageContent, renderSegments, WidgetContext } from "./widgets";
 
 interface MessageRowDeps {
@@ -36,7 +37,6 @@ export class MessageRow {
 	private renderedContent: string | null = null;
 	private renderedThinking: string | null = null;
 	private renderedToolCount = 0;
-	private renderedShowThinking = false;
 	private renderedShowTools = false;
 	private renderedThinkingTitle = "";
 	private renderedToolsTitle = "";
@@ -66,12 +66,6 @@ export class MessageRow {
 	private thinkingRenderHandle: number | null = null;
 	private thinkingRenderInFlight: Promise<void> | null = null;
 	private thinkingRenderPending = false;
-
-	// Lazy historical-thinking render: collapsed thinking bubbles in past
-	// turns are kept as plain text so renderMessages on a long thread does
-	// not pay N markdown renders. Materialized on first <details> open.
-	private historicalThinkingMaterialized = false;
-	private historicalThinkingToggleHandler: (() => void) | null = null;
 
 	constructor(message: ChatMessage, deps: MessageRowDeps) {
 		this.message = message;
@@ -111,17 +105,16 @@ export class MessageRow {
 			return;
 		}
 
-		const showThinking = this.deps.showThinking() && message.role === "porygon" && !!message.thinking;
+		const hasThinking = message.role === "porygon" && !!message.thinking;
 		const showTools = this.deps.showToolUsage() && message.role === "porygon" && !!message.toolIntents && message.toolIntents.length > 0;
 		const showContent = !(message.role === "porygon" && !message.content);
 
 		this.reconcileMentions(message);
-		this.reconcileThinking(message, showThinking, forceFull);
+		this.reconcileThinking(message, hasThinking, forceFull);
 		this.reconcileTools(message, showTools, forceFull);
 		this.reconcileContent(message, showContent, forceFull);
 		this.reconcileActions(message, showContent);
 
-		this.renderedShowThinking = showThinking;
 		this.renderedShowTools = showTools;
 		this.renderedIsStreaming = !!message.isStreaming;
 	}
@@ -147,7 +140,11 @@ export class MessageRow {
 				this.update(this.message);
 				return;
 			}
-			this.scheduleThinkingRender();
+			// Collapsed live bubbles stay static and cheap; opening them
+			// materializes the markdown from the accumulated text.
+			if (this.thinkingDetailsEl?.open) {
+				this.scheduleThinkingRender();
+			}
 		} else if (kind === "tool") {
 			// Tools are structural (new <li>), rare, and cheap. Reconcile.
 			this.update(this.message);
@@ -208,38 +205,47 @@ export class MessageRow {
 		});
 	}
 
-	private reconcileThinking(message: ChatMessage, showThinking: boolean, forceFull: boolean): void {
+	private reconcileThinking(message: ChatMessage, hasThinking: boolean, forceFull: boolean): void {
 		if (!this.messageStackEl) return;
-		if (!showThinking) {
+		if (!hasThinking) {
 			if (this.thinkingDetailsEl) {
 				this.thinkingDetailsEl.remove();
 				this.thinkingDetailsEl = null;
 				this.thinkingTitleEl = null;
 				this.thinkingContentEl = null;
 				this.renderedThinking = null;
+				this.renderedThinkingTitle = "";
 				this.renderedThinkingCollapsed = null;
-				this.historicalThinkingMaterialized = false;
 			}
 			return;
 		}
 
 		const thinking = message.thinking ?? "";
-		const title = getThinkingTitle(message);
 		const isStreaming = !!message.isStreaming;
 		const streamingTransition = this.renderedIsStreaming !== isStreaming;
+		const expanded = isThinkingExpanded({
+			thinking: message.thinking,
+			isStreaming,
+			isThinkingCollapsed: message.isThinkingCollapsed,
+			thinkingDurationSeconds: message.thinkingDurationSeconds,
+			showThinkingByDefault: this.deps.showThinking(),
+		});
 
 		if (!this.thinkingDetailsEl) {
-			this.buildThinkingBubble(message);
+			this.buildThinkingBubble(message, expanded);
 		}
 
-		// Sync collapsed state from message flags (set by view.ts at
-		// end-of-turn) so completed responses auto-collapse the bubble.
-		const collapsed = !!message.isThinkingCollapsed;
+		// Sync expansion from the message flags. The turn lifecycle sets the
+		// flag when the answer starts and when the turn ends; the user's own
+		// toggles live only on the row and are never persisted.
+		const collapsed = !expanded;
 		if (this.thinkingDetailsEl && this.renderedThinkingCollapsed !== collapsed) {
-			this.thinkingDetailsEl.open = !collapsed;
+			this.thinkingDetailsEl.open = expanded;
 			this.renderedThinkingCollapsed = collapsed;
 		}
+		this.thinkingDetailsEl?.classList.toggle("is-reasoning", isStreaming);
 
+		const title = getThinkingTitle(message);
 		if (this.thinkingTitleEl && (forceFull || title !== this.renderedThinkingTitle)) {
 			this.thinkingTitleEl.setText(title);
 			this.renderedThinkingTitle = title;
@@ -247,40 +253,41 @@ export class MessageRow {
 
 		if (!this.thinkingContentEl) return;
 
-		// Streaming branch: rAF-coalesced markdown render.
 		if (isStreaming) {
-			if (streamingTransition || this.renderedThinking === null) {
-				// Bubble was just created (or moved into streaming mode);
-				// schedule a render so the equality guard updates.
-				this.scheduleThinkingRender();
-			} else if (thinking !== this.renderedThinking) {
-				this.scheduleThinkingRender();
+			if (expanded) {
+				if (streamingTransition || thinking !== this.renderedThinking) {
+					this.scheduleThinkingRender();
+				}
 			}
 			return;
 		}
 
-		// Historical branch.
-		if (streamingTransition) {
-			// Just finished streaming: keep what's on screen (already
-			// markdown-rendered) and switch to lazy mode for future opens.
-			this.historicalThinkingMaterialized = true;
+		if (expanded) {
+			this.renderHistoricalThinking(message, thinking);
+		} else if (this.renderedThinking !== thinking) {
+			// Collapsed history stays cheap: plain text until the user opens
+			// the bubble, then the markdown is materialized once.
+			this.setThinkingPlainText(thinking);
 		}
-		this.bindHistoricalThinking(message, thinking);
 	}
 
-	private buildThinkingBubble(message: ChatMessage): void {
+	private buildThinkingBubble(message: ChatMessage, expanded: boolean): void {
 		if (!this.messageStackEl) return;
 		const details = this.messageStackEl.createEl("details", { cls: "porygon-thinking-bubble" });
-		details.open = !message.isThinkingCollapsed;
+		details.open = expanded;
 		const summary = details.createEl("summary", { cls: "porygon-thinking-summary" });
 		const iconEl = summary.createSpan({ cls: "porygon-thinking-icon" });
 		setIcon(iconEl, "lightbulb");
 		const titleEl = summary.createSpan({ text: "" });
-		summary.addEventListener("click", () => {
-			window.setTimeout(() => {
-				message.isThinkingCollapsed = !details.open;
-				this.renderedThinkingCollapsed = !details.open;
-			}, 0);
+		// Native <details> toggle fires after open changes, so no click +
+		// setTimeout workaround is needed. Opening materializes the content;
+		// closing just records the manual state for this turn.
+		details.addEventListener("toggle", () => {
+			message.isThinkingCollapsed = !details.open;
+			this.renderedThinkingCollapsed = !details.open;
+			if (details.open) {
+				this.materializeThinking();
+			}
 		});
 		const contentEl = details.createDiv({ cls: "porygon-thinking-content markdown-rendered" });
 		// Insert thinking before tools/content so order is preserved.
@@ -289,37 +296,37 @@ export class MessageRow {
 		this.thinkingTitleEl = titleEl;
 		this.thinkingContentEl = contentEl;
 		this.renderedThinking = null;
+		this.renderedThinkingCollapsed = !expanded;
 	}
 
-	private bindHistoricalThinking(message: ChatMessage, thinking: string): void {
-		const details = this.thinkingDetailsEl;
+	private materializeThinking(): void {
+		if (this.message.isStreaming) {
+			this.scheduleThinkingRender();
+			return;
+		}
+		this.renderHistoricalThinking(this.message, this.message.thinking ?? "");
+	}
+
+	private renderHistoricalThinking(message: ChatMessage, thinking: string): void {
 		const contentEl = this.thinkingContentEl;
-		if (!details || !contentEl) return;
-		const materialize = () => {
-			if (this.historicalThinkingMaterialized && this.renderedThinking === thinking) return;
-			this.historicalThinkingMaterialized = true;
-			this.renderedThinking = thinking;
-			contentEl.empty();
-			void MarkdownRenderer.render(this.deps.app, thinking, contentEl, "/", this.deps.component).then(() => {
-				if (details.open) {
-					contentEl.scrollTop = contentEl.scrollHeight;
-				}
-			});
-		};
-		if (!this.historicalThinkingMaterialized) {
-			if (details.open) {
-				materialize();
-			} else {
-				contentEl.empty();
-				contentEl.setText(thinking);
+		if (!contentEl || this.renderedThinking === thinking) return;
+		this.renderedThinking = thinking;
+		contentEl.empty();
+		void MarkdownRenderer.render(this.deps.app, thinking, contentEl, "/", this.deps.component).then(() => {
+			if (this.thinkingContentEl !== contentEl) return;
+			if (this.message.thinking !== thinking) return;
+			if (this.thinkingDetailsEl?.open) {
+				contentEl.scrollTop = contentEl.scrollHeight;
 			}
-		}
-		if (!this.historicalThinkingToggleHandler) {
-			this.historicalThinkingToggleHandler = () => {
-				if (details.open) materialize();
-			};
-			details.addEventListener("toggle", this.historicalThinkingToggleHandler);
-		}
+		});
+	}
+
+	private setThinkingPlainText(thinking: string): void {
+		const contentEl = this.thinkingContentEl;
+		if (!contentEl || contentEl.textContent === thinking) return;
+		this.renderedThinking = null;
+		contentEl.empty();
+		contentEl.setText(thinking);
 	}
 
 	private reconcileTools(message: ChatMessage, showTools: boolean, forceFull: boolean): void {
@@ -633,13 +640,6 @@ export class MessageRow {
 		this.contentRenderPending = false;
 		this.thinkingRenderPending = false;
 	}
-}
-
-function getThinkingTitle(message: ChatMessage): string {
-	if (message.isStreaming) return "Thinking...";
-	if (message.thinkingDurationSeconds === undefined) return "Thought";
-	const unit = message.thinkingDurationSeconds === 1 ? "second" : "seconds";
-	return `Thought for ${message.thinkingDurationSeconds} ${unit}`;
 }
 
 function getToolsTitle(message: ChatMessage): string {

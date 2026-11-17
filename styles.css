@@ -279,6 +279,24 @@
 	margin-bottom: 0;
 }
 
+/* Live reasoning while collapsed: the label stays static, the icon
+ * communicates progress without shifting layout. */
+.porygon-thinking-bubble.is-reasoning:not([open]) .porygon-thinking-icon {
+	color: var(--interactive-accent);
+	animation: porygon-thinking-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes porygon-thinking-pulse {
+	0%,
+	100% {
+		opacity: 0.55;
+	}
+
+	50% {
+		opacity: 1;
+	}
+}
+
 .porygon-tools-bubble {
 	width: 100%;
 	margin: 0;
@@ -361,6 +379,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+	.porygon-thinking-bubble.is-reasoning:not([open]) .porygon-thinking-icon {
+		animation: none;
+		color: var(--interactive-accent);
+	}
+
 	.porygon-tools-item.is-executing .porygon-tools-intent {
 		animation: none;
 		color: var(--interactive-accent);

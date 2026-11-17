@@ -12,6 +12,9 @@ export interface PorygonPluginSettings {
 	ollamaChatModel: string;
 	ollamaEmbeddingModel: string;
 	thinkingEffort: ThinkingEffort;
+	// Whether reasoning starts expanded. The Thinking indicator itself is
+	// always available when the model reasons; this only controls default
+	// expansion. Kept under this key for settings compatibility.
 	showThinking: boolean;
 	showToolUsage: boolean;
 	showTokenStats: boolean;
@@ -72,7 +75,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 	{
 		value: "minimal",
 		label: "Minimal — just the answer",
-		description: "Clean replies only. No reasoning, no tool activity.",
+		description: "Clean replies with reasoning collapsed. No tool activity.",
 		showThinking: false,
 		showToolUsage: false,
 		yolo: false,
@@ -80,7 +83,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 	{
 		value: "balanced",
 		label: "Balanced — show tool activity",
-		description: "See what Porygon does in your vault, without the inner monologue.",
+		description: "See what Porygon does in your vault. Reasoning stays collapsed.",
 		showThinking: false,
 		showToolUsage: true,
 		yolo: false,
@@ -88,7 +91,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 	{
 		value: "verbose",
 		label: "Verbose — show thinking and tools (recommended)",
-		description: "Full transparency: reasoning stream and every tool call.",
+		description: "Full transparency: reasoning streams expanded and every tool call is shown.",
 		showThinking: true,
 		showToolUsage: true,
 		yolo: false,
@@ -96,7 +99,7 @@ export const EXPERIENCE_PRESETS: ExperiencePresetConfig[] = [
 	{
 		value: "yolo",
 		label: "YOLO — auto-approve everything",
-		description: "Skip approvals for vault changes. No reasoning, no tool reporting.",
+		description: "Skip approvals for vault changes. Reasoning stays collapsed and tool reporting is off.",
 		showThinking: false,
 		showToolUsage: false,
 		yolo: true,
