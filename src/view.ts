@@ -4,6 +4,7 @@ import { applyToolExecution } from "./agent/tool-events";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
+import { isThinkingExpanded } from "./chat/thinking-state";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 import { getActiveProvider } from "./providers";
 import { PopoverHost } from "./ui/popover";
@@ -1759,7 +1760,12 @@ export class PorygonView extends ItemView {
 		this.messages.push(userMessage);
 		const fileMessages = await this.createFileContextMessages(mentionSnapshots);
 		this.messages.push(...fileMessages);
-		const porygonMessage: ChatMessage = { role: "porygon", content: "Connecting...", createdAt: new Date().toISOString(), isStreaming: true };
+		const porygonMessage: ChatMessage = {
+			role: "porygon",
+			content: "Connecting...",
+			createdAt: new Date().toISOString(),
+			isStreaming: true,
+		};
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
 		this.streamingMessage = porygonMessage;
@@ -1795,20 +1801,34 @@ export class PorygonView extends ItemView {
 				// Collapse thinking + tools as soon as the answer starts
 				// streaming so the user's focus shifts to the answer. The
 				// notifyChanged() call rerenders this row only.
-				let changed = false;
-				if (porygonMessage.thinking && !porygonMessage.isThinkingCollapsed) {
+				let layoutChanged = false;
+				// Freeze the reasoning duration at answer start even when the
+				// bubble is already collapsed (default-off or manual close).
+				// This also ends the reasoning phase, which stops the live
+				// pulse on the collapsed summary icon.
+				const reasoningJustEnded = !!porygonMessage.thinking
+					&& porygonMessage.thinkingDurationSeconds === undefined
+					&& thinkingStartedAt !== null;
+				if (reasoningJustEnded && thinkingStartedAt !== null) {
+					porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
+				}
+				const reasoningExpanded = isThinkingExpanded({
+					isStreaming: true,
+					isThinkingCollapsed: porygonMessage.isThinkingCollapsed,
+					showThinkingByDefault: this.plugin.settings.showThinking,
+				});
+				if (porygonMessage.thinking && reasoningExpanded) {
 					porygonMessage.isThinkingCollapsed = true;
-					if (thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
-						porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
-					}
-					changed = true;
+					layoutChanged = true;
 				}
 				if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0 && !porygonMessage.areToolsCollapsed) {
 					porygonMessage.areToolsCollapsed = true;
-					changed = true;
+					layoutChanged = true;
 				}
-				if (changed) {
+				if (layoutChanged || reasoningJustEnded) {
 					this.chatList?.notifyChanged(porygonMessage);
+				}
+				if (layoutChanged) {
 					// Collapsing thinking can shrink the message by hundreds
 					// of px, pushing the freshly-streaming answer above the
 					// viewport. Re-pin the user message to the top so the
@@ -1871,7 +1891,6 @@ export class PorygonView extends ItemView {
 					clearPendingAnswerPlaceholder();
 					thinkingStartedAt = thinkingStartedAt ?? Date.now();
 					porygonMessage.thinking = `${porygonMessage.thinking ?? ""}${delta}`;
-					porygonMessage.isThinkingCollapsed = false;
 					// Routed to this row only. MessageRow materializes the
 					// thinking <details> on the first delta automatically.
 					this.chatList?.notifyStreamingDelta(porygonMessage, "thinking");
@@ -1894,12 +1913,9 @@ export class PorygonView extends ItemView {
 			}
 			this.isSessionMemoryPrimed = true;
 
-			if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
-				porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
-			}
-			await this.finalizeStreaming(porygonMessage);
+			await this.finalizeStreaming(porygonMessage, thinkingStartedAt);
 			// Single-row update to switch from "streaming" to "historical"
-			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
+			// presentation (Reasoning... -> Reasoned for Xs, collapsed bubbles).
 			this.chatList?.notifyChanged(porygonMessage);
 			await this.autosaveSession();
 		} catch (error) {
@@ -1929,8 +1945,16 @@ export class PorygonView extends ItemView {
 	// Sync-finalize: drain the row's in-flight rAF render so the post-turn
 	// notifyChanged() doesn't race a late delta, then flip isStreaming off.
 	// Mirrors open-webui's cancelAnimationFrame + sync parse on done.
-	private async finalizeStreaming(message: ChatMessage): Promise<void> {
+	private async finalizeStreaming(message: ChatMessage, thinkingStartedAt: number | null = null): Promise<void> {
 		this.freezeToolTimings(message);
+		// A turn always ends collapsed, with a duration when it reasoned.
+		// Normal completion, cancellation, and errors all funnel here.
+		if (message.thinking) {
+			message.isThinkingCollapsed = true;
+			if (message.thinkingDurationSeconds === undefined && thinkingStartedAt !== null) {
+				message.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
+			}
+		}
 		if (this.chatList) {
 			await this.chatList.finalizeStreaming(message);
 		}
@@ -1990,7 +2014,7 @@ export class PorygonView extends ItemView {
 		hasStartedStreamingContent: boolean,
 		thinkingStartedAt: number | null,
 	): Promise<void> {
-		await this.finalizeStreaming(porygonMessage);
+		await this.finalizeStreaming(porygonMessage, thinkingStartedAt);
 		const hasPartialReply = hasStartedStreamingContent
 			|| !!porygonMessage.thinking
 			|| (porygonMessage.toolIntents?.length ?? 0) > 0;
@@ -2003,9 +2027,6 @@ export class PorygonView extends ItemView {
 		}
 
 		this.isSessionMemoryPrimed = true;
-		if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
-			porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
-		}
 		this.chatList?.notifyChanged(porygonMessage);
 		await this.autosaveSession();
 	}
