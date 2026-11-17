@@ -4,6 +4,7 @@ import { applyToolExecution } from "./agent/tool-events";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
+import { stripSlashTrigger } from "./chat/composer-slash";
 import { isThinkingExpanded } from "./chat/thinking-state";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 import { getActiveProvider } from "./providers";
@@ -161,6 +162,10 @@ export class PorygonView extends ItemView {
 	private selectedMentions: MentionedItem[] = [];
 	private filteredSlashCommands: SlashCommand[] = [];
 	private selectedSlashCommandIndex = 0;
+	// Index of the "/" typed into the composer that opened the slash-command
+	// popover (null when it was opened from the toolbar). Lets a selected
+	// command consume the trigger character instead of leaving it behind.
+	private slashTriggerIndex: number | null = null;
 	private sessionResults: SessionSummary[] = [];
 	private allSessionSummaries: SessionSummary[] = [];
 	private selectedSessionIndex = 0;
@@ -384,6 +389,9 @@ export class PorygonView extends ItemView {
 			}
 
 			if (event.key === "/" && !this.popoverHost.isOpen(POPOVER_SLASH)) {
+				// Record the position before the character is inserted; the popover
+				// opens on the next tick with focus in its own filter input.
+				this.slashTriggerIndex = this.composerInputEl?.selectionStart ?? null;
 				window.setTimeout(() => this.renderSlashCommandPopover(composer), 0);
 				return;
 			}
@@ -1086,6 +1094,7 @@ export class PorygonView extends ItemView {
 				onClose: () => {
 					this.filteredSlashCommands = [];
 					this.selectedSlashCommandIndex = 0;
+					this.slashTriggerIndex = null;
 				},
 			};
 		});
@@ -1184,6 +1193,8 @@ export class PorygonView extends ItemView {
 	}
 
 	private selectSlashCommand(command: SlashCommand): void {
+		// Consume the trigger before closing, since onClose clears the index.
+		this.stripSlashTriggerFromComposer();
 		this.popoverHost.closeCurrent();
 		this.composerInputEl?.focus();
 
@@ -1195,6 +1206,22 @@ export class PorygonView extends ItemView {
 		if (command.id === "resume") {
 			void this.handleSessionsCommand();
 		}
+	}
+
+	private stripSlashTriggerFromComposer(): void {
+		if (!this.composerInputEl) {
+			return;
+		}
+
+		const result = stripSlashTrigger(this.composerInputEl.value, this.slashTriggerIndex);
+		this.slashTriggerIndex = null;
+		if (!result) {
+			return;
+		}
+
+		this.composerInputEl.value = result.value;
+		this.composerInputEl.setSelectionRange(result.caret, result.caret);
+		this.handleComposerInput();
 	}
 
 	private async handleSessionsCommand(): Promise<void> {
