@@ -1,5 +1,6 @@
 import { getFrontMatterInfo, ItemView, MarkdownRenderer, normalizePath, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
+import { applyToolExecution } from "./agent/tool-events";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
@@ -1847,6 +1848,18 @@ export class PorygonView extends ItemView {
 					// Structural: routed to this row only, not the whole list.
 					this.chatList?.notifyStreamingDelta(porygonMessage, "tool");
 				},
+				onToolExecution: (event) => {
+					if (!isCurrentTurn()) {
+						return;
+					}
+					// Mutates the matching intent's transient timing fields; the
+					// row's next reconcile syncs the duration span and glow.
+					const intent = applyToolExecution(porygonMessage.toolIntents, event);
+					if (!intent) {
+						return;
+					}
+					this.chatList?.notifyStreamingDelta(porygonMessage, "tool");
+				},
 				onContentDelta: (delta) => {
 					clearPendingAnswerPlaceholder();
 					if (!hasStartedStreamingContent) collapseThinkingAndTools();
@@ -1917,11 +1930,29 @@ export class PorygonView extends ItemView {
 	// notifyChanged() doesn't race a late delta, then flip isStreaming off.
 	// Mirrors open-webui's cancelAnimationFrame + sync parse on done.
 	private async finalizeStreaming(message: ChatMessage): Promise<void> {
+		this.freezeToolTimings(message);
 		if (this.chatList) {
 			await this.chatList.finalizeStreaming(message);
 		}
 		message.isStreaming = false;
 		this.streamingMessage = null;
+	}
+
+	// End-of-turn timing freeze. A running tool (turn stopped mid-call) keeps
+	// the elapsed value observed when the turn ended; anything that never ran
+	// settles at 0ms. Events arriving after this point are dropped because
+	// streamLocalAgent already cleared its observer.
+	private freezeToolTimings(message: ChatMessage): void {
+		const now = performance.now();
+		for (const intent of message.toolIntents ?? []) {
+			if (intent.isExecuting && intent.executionStartedAt !== undefined) {
+				intent.durationMs = Math.max(0, Math.round(now - intent.executionStartedAt));
+			} else if (intent.durationMs === undefined) {
+				intent.durationMs = 0;
+			}
+			intent.isExecuting = false;
+			intent.executionStartedAt = undefined;
+		}
 	}
 
 	private cancelStreaming(): void {

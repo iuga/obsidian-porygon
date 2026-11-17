@@ -1,6 +1,8 @@
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
+import type { AgentToolCallIntent } from "../agent/agent";
 import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
+import { formatToolDuration, formatToolElapsed } from "./tool-duration";
 import { parseMessageContent, renderSegments, WidgetContext } from "./widgets";
 
 interface MessageRowDeps {
@@ -49,6 +51,8 @@ export class MessageRow {
 	private toolsDetailsEl: HTMLDetailsElement | null = null;
 	private toolsTitleEl: HTMLSpanElement | null = null;
 	private toolsListEl: HTMLElement | null = null;
+	private readonly toolDurationEls = new Map<string, { itemEl: HTMLLIElement; durationEl: HTMLSpanElement }>();
+	private toolTickerHandle: number | null = null;
 	private contentBubbleEl: HTMLElement | null = null;
 	private contentEl: HTMLElement | null = null;
 	private actionsEl: HTMLElement | null = null;
@@ -89,6 +93,7 @@ export class MessageRow {
 
 	dispose(): void {
 		this.cancelStreamingRenders();
+		this.stopToolTicker();
 		this.el.remove();
 	}
 
@@ -156,6 +161,7 @@ export class MessageRow {
 	 */
 	async finalizeStreaming(): Promise<void> {
 		this.cancelStreamingRenders();
+		this.stopToolTicker();
 		const pending: Array<Promise<void>> = [];
 		if (this.contentRenderInFlight) pending.push(this.contentRenderInFlight);
 		if (this.thinkingRenderInFlight) pending.push(this.thinkingRenderInFlight);
@@ -327,6 +333,8 @@ export class MessageRow {
 				this.renderedToolCount = 0;
 				this.renderedToolsCollapsed = null;
 			}
+			this.toolDurationEls.clear();
+			this.stopToolTicker();
 			return;
 		}
 
@@ -352,16 +360,65 @@ export class MessageRow {
 			// detail UI / DOM identity is preserved.
 			if (intents.length < this.renderedToolCount) {
 				this.toolsListEl.empty();
+				this.toolDurationEls.clear();
 				this.renderedToolCount = 0;
 			}
 			for (let i = this.renderedToolCount; i < intents.length; i += 1) {
 				const intent = intents[i];
 				if (!intent) continue;
 				const itemEl = this.toolsListEl.createEl("li", { cls: "porygon-tools-item" });
-				itemEl.createSpan({ cls: "porygon-tools-intent", text: intent.intent });
+				const rowEl = itemEl.createDiv({ cls: "porygon-tools-row" });
+				rowEl.createSpan({ cls: "porygon-tools-intent", text: intent.intent });
+				const durationEl = rowEl.createSpan({ cls: "porygon-tools-duration" });
+				this.toolDurationEls.set(intent.id, { itemEl, durationEl });
 			}
 			this.renderedToolCount = intents.length;
 		}
+
+		this.syncToolDurations(intents);
+		this.ensureToolTicker(intents);
+	}
+
+	/**
+	 * Writes the live/fixed value and glow class for every already-rendered
+	 * item. Cheap enough to run on each structural reconcile; the ticker calls
+	 * it once a second without re-running list or markdown work.
+	 */
+	private syncToolDurations(intents: AgentToolCallIntent[], now = performance.now()): void {
+		for (const intent of intents) {
+			const refs = this.toolDurationEls.get(intent.id);
+			if (!refs) continue;
+			const isExecuting = !!intent.isExecuting && intent.executionStartedAt !== undefined;
+			refs.itemEl.classList.toggle("is-executing", isExecuting);
+			if (isExecuting) {
+				refs.durationEl.setText(formatToolElapsed(intent.executionStartedAt ?? now, now));
+			} else if (intent.durationMs !== undefined) {
+				refs.durationEl.setText(formatToolDuration(intent.durationMs));
+			} else {
+				refs.durationEl.setText("");
+			}
+		}
+	}
+
+	// One ticker per row, not per item: concurrent tools update together and a
+	// long thread never accumulates intervals.
+	private ensureToolTicker(intents: AgentToolCallIntent[]): void {
+		const hasRunning = intents.some((intent) => intent.isExecuting && intent.executionStartedAt !== undefined);
+		if (!hasRunning) {
+			this.stopToolTicker();
+			return;
+		}
+		if (this.toolTickerHandle !== null) return;
+		this.toolTickerHandle = window.setInterval(() => {
+			this.syncToolDurations(this.message.toolIntents ?? []);
+			this.ensureToolTicker(this.message.toolIntents ?? []);
+		}, 1000);
+	}
+
+	private stopToolTicker(): void {
+		if (this.toolTickerHandle === null) return;
+		window.clearInterval(this.toolTickerHandle);
+		this.toolTickerHandle = null;
 	}
 
 	private buildToolsBubble(message: ChatMessage): void {
