@@ -121,7 +121,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Show reasoning by default",
-						desc: "Reasoning always shows a thinking indicator. When on, the reasoning text streams expanded; when off it stays collapsed until you expand it.",
+						desc: "Reasoning models always show a reasoning indicator. When on, the reasoning text streams expanded; when off it stays collapsed until you expand it.",
 						control: { key: "showThinking", type: "toggle" },
 					},
 					{
@@ -296,7 +296,7 @@ export class PorygonSettingTab extends PluginSettingTab {
 
 		new Setting(chatItems)
 			.setName("Show reasoning by default")
-			.setDesc("Reasoning always shows a thinking indicator. When on, the reasoning text streams expanded; when off it stays collapsed until you expand it.")
+			.setDesc("Reasoning models always show a reasoning indicator. When on, the reasoning text streams expanded; when off it stays collapsed until you expand it.")
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.showThinking)
 				.onChange(async (value) => {

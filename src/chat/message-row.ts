@@ -3,7 +3,7 @@ import type { AgentToolCallIntent } from "../agent/agent";
 import { copyToClipboard, renderMessageActions } from "./message-actions";
 import { ChatMessage, MentionedItem, MentionType, StreamingDeltaKind } from "./types";
 import { formatToolDuration, formatToolElapsed } from "./tool-duration";
-import { getThinkingTitle, isThinkingExpanded } from "./thinking-state";
+import { getThinkingTitle, isReasoningActive, isThinkingExpanded } from "./thinking-state";
 import { parseMessageContent, renderSegments, WidgetContext } from "./widgets";
 
 interface MessageRowDeps {
@@ -41,7 +41,7 @@ export class MessageRow {
 	private renderedThinkingTitle = "";
 	private renderedToolsTitle = "";
 	private renderedIsStreaming = false;
-	private renderedThinkingCollapsed: boolean | null = null;
+	private renderedThinkingExpanded: boolean | null = null;
 	private renderedToolsCollapsed: boolean | null = null;
 
 	// Bubble element refs (created on demand, kept across updates).
@@ -215,7 +215,7 @@ export class MessageRow {
 				this.thinkingContentEl = null;
 				this.renderedThinking = null;
 				this.renderedThinkingTitle = "";
-				this.renderedThinkingCollapsed = null;
+				this.renderedThinkingExpanded = null;
 			}
 			return;
 		}
@@ -224,26 +224,23 @@ export class MessageRow {
 		const isStreaming = !!message.isStreaming;
 		const streamingTransition = this.renderedIsStreaming !== isStreaming;
 		const expanded = isThinkingExpanded({
-			thinking: message.thinking,
 			isStreaming,
 			isThinkingCollapsed: message.isThinkingCollapsed,
-			thinkingDurationSeconds: message.thinkingDurationSeconds,
 			showThinkingByDefault: this.deps.showThinking(),
 		});
 
 		if (!this.thinkingDetailsEl) {
-			this.buildThinkingBubble(message, expanded);
+			this.buildThinkingBubble(expanded);
 		}
 
-		// Sync expansion from the message flags. The turn lifecycle sets the
-		// flag when the answer starts and when the turn ends; the user's own
-		// toggles live only on the row and are never persisted.
-		const collapsed = !expanded;
-		if (this.thinkingDetailsEl && this.renderedThinkingCollapsed !== collapsed) {
+		// Sync expansion from the resolved state. The turn lifecycle writes
+		// the flag when the answer starts and at turn end; the user's own
+		// toggles write the same flag, for this turn only.
+		if (this.thinkingDetailsEl && this.renderedThinkingExpanded !== expanded) {
 			this.thinkingDetailsEl.open = expanded;
-			this.renderedThinkingCollapsed = collapsed;
+			this.renderedThinkingExpanded = expanded;
 		}
-		this.thinkingDetailsEl?.classList.toggle("is-reasoning", isStreaming);
+		this.thinkingDetailsEl?.classList.toggle("is-reasoning", isReasoningActive(message));
 
 		const title = getThinkingTitle(message);
 		if (this.thinkingTitleEl && (forceFull || title !== this.renderedThinkingTitle)) {
@@ -271,7 +268,7 @@ export class MessageRow {
 		}
 	}
 
-	private buildThinkingBubble(message: ChatMessage, expanded: boolean): void {
+	private buildThinkingBubble(expanded: boolean): void {
 		if (!this.messageStackEl) return;
 		const details = this.messageStackEl.createEl("details", { cls: "porygon-thinking-bubble" });
 		details.open = expanded;
@@ -283,8 +280,8 @@ export class MessageRow {
 		// setTimeout workaround is needed. Opening materializes the content;
 		// closing just records the manual state for this turn.
 		details.addEventListener("toggle", () => {
-			message.isThinkingCollapsed = !details.open;
-			this.renderedThinkingCollapsed = !details.open;
+			this.message.isThinkingCollapsed = !details.open;
+			this.renderedThinkingExpanded = details.open;
 			if (details.open) {
 				this.materializeThinking();
 			}
@@ -296,7 +293,7 @@ export class MessageRow {
 		this.thinkingTitleEl = titleEl;
 		this.thinkingContentEl = contentEl;
 		this.renderedThinking = null;
-		this.renderedThinkingCollapsed = !expanded;
+		this.renderedThinkingExpanded = expanded;
 	}
 
 	private materializeThinking(): void {

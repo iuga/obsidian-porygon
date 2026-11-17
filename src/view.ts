@@ -4,6 +4,7 @@ import { applyToolExecution } from "./agent/tool-events";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
 import { ChatList } from "./chat/chat-list";
+import { isThinkingExpanded } from "./chat/thinking-state";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
 import { getActiveProvider } from "./providers";
 import { PopoverHost } from "./ui/popover";
@@ -1764,10 +1765,6 @@ export class PorygonView extends ItemView {
 			content: "Connecting...",
 			createdAt: new Date().toISOString(),
 			isStreaming: true,
-			// Snapshot the default expansion for this turn. Later setting
-			// changes only affect new turns, and the user can still toggle
-			// this bubble manually.
-			isThinkingCollapsed: !this.plugin.settings.showThinking,
 		};
 		this.messages.push(porygonMessage);
 		this.isStreaming = true;
@@ -1804,23 +1801,34 @@ export class PorygonView extends ItemView {
 				// Collapse thinking + tools as soon as the answer starts
 				// streaming so the user's focus shifts to the answer. The
 				// notifyChanged() call rerenders this row only.
-				let changed = false;
+				let layoutChanged = false;
 				// Freeze the reasoning duration at answer start even when the
-				// bubble is already collapsed (default-off or manual close),
-				// so "Thought for Xs" never includes answer-stream time.
-				if (porygonMessage.thinking && thinkingStartedAt !== null && porygonMessage.thinkingDurationSeconds == null) {
+				// bubble is already collapsed (default-off or manual close).
+				// This also ends the reasoning phase, which stops the live
+				// pulse on the collapsed summary icon.
+				const reasoningJustEnded = !!porygonMessage.thinking
+					&& porygonMessage.thinkingDurationSeconds === undefined
+					&& thinkingStartedAt !== null;
+				if (reasoningJustEnded && thinkingStartedAt !== null) {
 					porygonMessage.thinkingDurationSeconds = this.getThinkingDurationSeconds(thinkingStartedAt);
 				}
-				if (porygonMessage.thinking && !porygonMessage.isThinkingCollapsed) {
+				const reasoningExpanded = isThinkingExpanded({
+					isStreaming: true,
+					isThinkingCollapsed: porygonMessage.isThinkingCollapsed,
+					showThinkingByDefault: this.plugin.settings.showThinking,
+				});
+				if (porygonMessage.thinking && reasoningExpanded) {
 					porygonMessage.isThinkingCollapsed = true;
-					changed = true;
+					layoutChanged = true;
 				}
 				if (porygonMessage.toolIntents && porygonMessage.toolIntents.length > 0 && !porygonMessage.areToolsCollapsed) {
 					porygonMessage.areToolsCollapsed = true;
-					changed = true;
+					layoutChanged = true;
 				}
-				if (changed) {
+				if (layoutChanged || reasoningJustEnded) {
 					this.chatList?.notifyChanged(porygonMessage);
+				}
+				if (layoutChanged) {
 					// Collapsing thinking can shrink the message by hundreds
 					// of px, pushing the freshly-streaming answer above the
 					// viewport. Re-pin the user message to the top so the
@@ -1907,7 +1915,7 @@ export class PorygonView extends ItemView {
 
 			await this.finalizeStreaming(porygonMessage, thinkingStartedAt);
 			// Single-row update to switch from "streaming" to "historical"
-			// presentation (Thinking... -> Thought for Xs, collapsed bubbles).
+			// presentation (Reasoning... -> Reasoned for Xs, collapsed bubbles).
 			this.chatList?.notifyChanged(porygonMessage);
 			await this.autosaveSession();
 		} catch (error) {

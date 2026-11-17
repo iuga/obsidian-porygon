@@ -1,23 +1,17 @@
 /**
- * Pure reasoning-display helpers shared by the message row and its tests.
+ * Pure reasoning-display helpers shared by the message row, the view, and
+ * their tests.
  *
  * `isThinkingCollapsed` is the per-message override: once the user (or the
- * turn lifecycle) sets it, it wins. Only while the flag is unset does the
- * setting decide the initial expansion for a live turn; finished turns
- * default to collapsed.
+ * turn lifecycle) sets it, it wins. While it is unset, a live turn follows
+ * the setting and a finished turn is collapsed.
  */
-export interface ThinkingStateInput {
-	thinking?: string;
+
+export function isThinkingExpanded(input: {
 	isStreaming?: boolean;
 	isThinkingCollapsed?: boolean;
-	thinkingDurationSeconds?: number;
-}
-
-export interface ThinkingDisplayInput extends ThinkingStateInput {
 	showThinkingByDefault: boolean;
-}
-
-export function isThinkingExpanded(input: ThinkingDisplayInput): boolean {
+}): boolean {
 	if (input.isThinkingCollapsed !== undefined) {
 		return !input.isThinkingCollapsed;
 	}
@@ -27,9 +21,24 @@ export function isThinkingExpanded(input: ThinkingDisplayInput): boolean {
 	return false;
 }
 
-export function getThinkingTitle(input: ThinkingStateInput): string {
-	if (input.isStreaming) return "Thinking...";
-	if (input.thinkingDurationSeconds === undefined) return "Thought";
+/**
+ * The reasoning phase runs from the first delta until the answer starts.
+ * The view freezes `thinkingDurationSeconds` at that moment, so a defined
+ * duration is the phase boundary; tool execution still belongs to it.
+ */
+export function isReasoningActive(input: {
+	isStreaming?: boolean;
+	thinkingDurationSeconds?: number;
+}): boolean {
+	return !!input.isStreaming && input.thinkingDurationSeconds === undefined;
+}
+
+export function getThinkingTitle(input: {
+	isStreaming?: boolean;
+	thinkingDurationSeconds?: number;
+}): string {
+	if (input.isStreaming) return "Reasoning...";
+	if (input.thinkingDurationSeconds === undefined) return "Reasoned";
 	const unit = input.thinkingDurationSeconds === 1 ? "second" : "seconds";
-	return `Thought for ${input.thinkingDurationSeconds} ${unit}`;
+	return `Reasoned for ${input.thinkingDurationSeconds} ${unit}`;
 }
