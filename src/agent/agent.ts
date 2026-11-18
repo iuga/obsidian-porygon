@@ -97,6 +97,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		memoriesStore: options.memoriesStore,
 		personalPrompt: options.settings.personalPrompt,
 		highlightrDetected: isHighlightrEnabled(options.app),
+		featureFlags: options.settings,
 	});
 
 	if (!agent) {

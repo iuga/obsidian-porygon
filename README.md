@@ -20,6 +20,7 @@ Porygon is a simple and practical workspace for thinking, learning, and daily wo
 - **Semantic search:** Find relevant notes by meaning instead of exact words, making it easier to discover related content across your vault.
 - **Long-term memory:** Porygon remembers short, concrete facts you share, keeping them across sessions so it can build on prior context instead of starting from scratch.
 - **Skills:** Teach the assistant reusable procedures with simple Markdown files stored in your vault, loaded on demand.
+- **Diagrams:** Ask for a flowchart, sequence, state, or other diagram of a note and Porygon writes a standard Mermaid block that your Mermaid plugin renders.
 - **Ask before guessing:** Porygon can pause mid-task to ask you a focused question with a few options when it needs your input, then resume where it left off.
 - **Approve before changing:** Destructive vault actions (create folder, create or edit a note, rename or move files) prompt for approval, with the option to deny with a short free-form reason so Porygon adjusts its next step. Turn on **YOLO mode** in settings to auto-approve when you want to move fast.
 - **Save and resume sessions:** Continue previous conversations at any time without losing context.
@@ -35,6 +36,8 @@ Porygon can save short, concrete observations about you and your work as long-te
 ### Skills
 
 Skills are reusable instructions that teach Porygon how to handle specific tasks, such as summarizing notes in a consistent format. Porygon stores them as Markdown files in the `skills/` subfolder of its internal folder (`porygon/skills/` by default, configurable under **Settings → Porygon → Advanced**) and automatically makes them available to the assistant. To add a new skill, create a `.md` file in that folder with a short YAML header containing `name` and `description`, then write the instructions below it.
+
+Porygon ships three bundled skills: `summarizer`, `explainer`, and an experimental `diagrammer`. The `diagrammer` skill turns a note or a request into a single Mermaid diagram, which renders through whichever Mermaid plugin you have enabled. It is off by default: enable **Mermaid diagrams** under **Settings → Porygon → Experimental**. While it is off, the skill file is not created and the assistant never sees it. Once enabled, the file is seeded on demand, so use the toggle rather than deleting it to turn the capability off again.
 
 ### Personalize your experience
 

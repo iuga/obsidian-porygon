@@ -2,12 +2,13 @@ import { App, normalizePath, TFile, TFolder } from "obsidian";
 import defaultPersonalPrompt from "../../prompts/personal.md";
 import { DEFAULT_MEMORIES } from "../agent/memories";
 import { ensureFolderExists } from "../utils/vault";
+import { featureFlagDefaults, type FeatureFlagSettings } from "./feature-flags";
 
 export type ExperiencePreset = "" | "minimal" | "balanced" | "verbose" | "yolo";
 
 export type ThinkingEffort = "off" | "low" | "medium" | "high";
 
-export interface PorygonPluginSettings {
+export interface PorygonPluginSettings extends FeatureFlagSettings {
 	ollamaHost: string;
 	ollamaChatModel: string;
 	ollamaEmbeddingModel: string;
@@ -31,6 +32,7 @@ export const DEFAULT_PERSONAL_PROMPT = defaultPersonalPrompt.trim();
 export const DEFAULT_PORYGON_FOLDER = "porygon";
 
 export const DEFAULT_SETTINGS: PorygonPluginSettings = {
+	...featureFlagDefaults(),
 	ollamaHost: "",
 	ollamaChatModel: "",
 	ollamaEmbeddingModel: "",
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 };
 
 export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
+	...featureFlagDefaults(),
 	ollamaHost: "http://localhost:11434",
 	ollamaChatModel: "gemma4",
 	ollamaEmbeddingModel: "qwen3-embedding",

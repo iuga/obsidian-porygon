@@ -2,6 +2,8 @@ import { Platform } from "obsidian";
 import defaultSystemPrompt from "../../prompts/system.md";
 import { buildMemoryPromptBlock, MemoriesStore } from "./memories";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
+import { filterAvailableSkills } from "./skill-visibility";
+import type { FeatureFlagSettings } from "../settings/feature-flags";
 
 const DEFAULT_SYSTEM_PROMPT = defaultSystemPrompt.trim();
 
@@ -10,6 +12,7 @@ export interface SystemPromptInputs {
 	memoriesStore: MemoriesStore;
 	personalPrompt: string;
 	highlightrDetected: boolean;
+	featureFlags: FeatureFlagSettings;
 }
 
 // Highlightr's full default palette (8 colors) versus the four base colors
@@ -18,8 +21,10 @@ export interface SystemPromptInputs {
 const FULL_HIGHLIGHT_PALETTE = "blue, red, yellow, green, pink, orange, cyan, purple, grey";
 const BASE_HIGHLIGHT_PALETTE = "blue, red, yellow, green";
 
-export function buildSystemPrompt({ skills, memoriesStore, personalPrompt, highlightrDetected }: SystemPromptInputs): string {
-	const skillsPrompt = buildAvailableSkillsPrompt(skills.getSkills());
+export function buildSystemPrompt({ skills, memoriesStore, personalPrompt, highlightrDetected, featureFlags }: SystemPromptInputs): string {
+	const skillsPrompt = buildAvailableSkillsPrompt(
+		filterAvailableSkills(skills.getSkills(), featureFlags),
+	);
 	const contextPrompt = buildContextPromptBlock();
 	const memoryPrompt = buildMemoryPromptBlock(memoriesStore.get());
 	const highlightPrompt = buildHighlightPromptBlock(highlightrDetected);
