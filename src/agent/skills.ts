@@ -3,7 +3,7 @@ import summarizerSkill from "../../skills/summarizer.md";
 import explainerSkill from "../../skills/explainer.md";
 import diagrammerSkill from "../../skills/diagrammer.md";
 import { ensureFolderExists } from "../utils/vault";
-import type { FeatureFlagKey } from "../settings/feature-flags";
+import { featureFlagForSkill, type FeatureFlagKey } from "../settings/feature-flags";
 
 export interface AgentSkill {
 	name: string;
@@ -17,9 +17,6 @@ interface BundledSkill {
 	// Seeded even when the skills folder already existed, so installs that
 	// predate the skill still receive it. Still never overwrites a file.
 	seedOnUpgrade?: boolean;
-	// Experimental capabilities stay completely inert while their flag is off:
-	// the file is not seeded and the skill is filtered out of the prompt.
-	featureFlag?: FeatureFlagKey;
 }
 
 interface ParsedSkillMarkdown {
@@ -29,10 +26,12 @@ interface ParsedSkillMarkdown {
 
 const SKILLS_SUBFOLDER = "skills";
 const REFRESH_DEBOUNCE_MS = 400;
+// Each filename matches the skill's frontmatter name; that name is the key the
+// feature-flag registry uses to gate a bundled skill.
 const BUNDLED_SKILLS: BundledSkill[] = [
 	{ filename: "summarizer.md", content: summarizerSkill },
 	{ filename: "explainer.md", content: explainerSkill},
-	{ filename: "diagrammer.md", content: diagrammerSkill, seedOnUpgrade: true, featureFlag: "mermaidDiagrams" },
+	{ filename: "diagrammer.md", content: diagrammerSkill, seedOnUpgrade: true },
 ];
 
 export class SkillsService {
@@ -145,10 +144,13 @@ async function ensureBundledSkills(
 	// respected; a deleted `seedOnUpgrade` skill is re-created, so the
 	// supported way to turn that capability off is its settings toggle.
 	//
-	// Experimental skills additionally require their feature flag, so an off
-	// flag leaves no trace: nothing is seeded on install or upgrade.
+	// Experimental skills stay completely inert while their flag is off: the
+	// registry entry names the skill it gates, and nothing is seeded on
+	// install or upgrade when that flag is disabled.
 	for (const skill of BUNDLED_SKILLS) {
-		if (skill.featureFlag && !isFeatureEnabled(skill.featureFlag)) {
+		const skillName = skill.filename.replace(/\.md$/i, "");
+		const flag = featureFlagForSkill(skillName);
+		if (flag !== undefined && !isFeatureEnabled(flag)) {
 			continue;
 		}
 

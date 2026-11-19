@@ -14,16 +14,27 @@ export interface FeatureFlagDefinition {
 	name: string;
 	description: string;
 	defaultEnabled: boolean;
+	/**
+	 * Skill name (the frontmatter `name` of a bundled skill) that only the
+	 * agent sees while this flag is on. This is the only declaration of the
+	 * association: seeding and prompt visibility both derive from it.
+	 */
+	gatesSkill?: string;
 }
 
 export const FEATURE_FLAGS = [
 	{
 		key: "mermaidDiagrams",
 		name: "Mermaid diagrams",
-		description: "Let the assistant draw flowcharts, sequence, state, and other diagrams as Mermaid code blocks. Displays when a Mermaid renderer is enabled; otherwise the block stays copyable.",
+		description: "Let the assistant draw flowcharts, sequence, state, and other diagrams as Mermaid code blocks that Obsidian renders in chat.",
 		defaultEnabled: false,
+		gatesSkill: "diagrammer",
 	},
 ] as const satisfies readonly FeatureFlagDefinition[];
+
+// Widened view of the registry so optional fields like `gatesSkill` stay
+// addressable on every entry, not just the ones that declare them.
+const FLAG_DEFINITIONS: readonly FeatureFlagDefinition[] = FEATURE_FLAGS;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];
 
@@ -35,6 +46,16 @@ export function isFeatureEnabled(settings: FeatureFlagSettings, key: FeatureFlag
 
 export function isFeatureFlagKey(value: string): value is FeatureFlagKey {
 	return FEATURE_FLAGS.some((flag) => flag.key === value);
+}
+
+/** The flag that gates a skill, or undefined when the skill is always available. */
+export function featureFlagForSkill(skillName: string): FeatureFlagKey | undefined {
+	for (const flag of FLAG_DEFINITIONS) {
+		if (flag.gatesSkill === skillName && isFeatureFlagKey(flag.key)) {
+			return flag.key;
+		}
+	}
+	return undefined;
 }
 
 /** Defaults derived from the registry, so a new flag can never miss one. */

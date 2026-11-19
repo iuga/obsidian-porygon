@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FEATURE_FLAGS, featureFlagDefaults, isFeatureEnabled, isFeatureFlagKey } from "../src/settings/feature-flags";
+import { FEATURE_FLAGS, featureFlagDefaults, featureFlagForSkill, isFeatureEnabled, isFeatureFlagKey } from "../src/settings/feature-flags";
 
 void describe("feature flags", () => {
 	void test("registry keys are unique", () => {
@@ -35,5 +35,15 @@ void describe("isFeatureFlagKey", () => {
 
 	void test("rejects ordinary settings keys", () => {
 		assert.equal(isFeatureFlagKey("showThinking"), false);
+	});
+});
+
+void describe("featureFlagForSkill", () => {
+	void test("returns the flag declared on the registry entry", () => {
+		assert.equal(featureFlagForSkill("diagrammer"), "mermaidDiagrams");
+	});
+
+	void test("returns undefined for an ungated skill", () => {
+		assert.equal(featureFlagForSkill("summarizer"), undefined);
 	});
 });
