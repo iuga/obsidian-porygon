@@ -3,6 +3,7 @@ import { PORYGON_SESSION_EXTENSION, PORYGON_VIEW_TYPE, PorygonView } from "./vie
 import { migrateLegacySessionFiles } from "./session-migration";
 import { RagIndexedDbStore, RagIndexer, RagSemanticSearchService } from "./rag";
 import { PorygonPluginSettings, DEFAULT_SETTINGS } from "./settings/settings";
+import { isFeatureEnabled } from "./settings/feature-flags";
 import { PorygonSettingTab } from "./settings/settings-tab";
 import { sanitizeMemories } from "./agent/memories";
 import { SkillsService } from "./agent/skills";
@@ -56,7 +57,11 @@ export default class PorygonPlugin extends Plugin {
 		initLangGraphAsyncContext();
 
 		await this.loadSettings();
-		this.skills = new SkillsService(this.app, () => this.settings.porygonFolder);
+		this.skills = new SkillsService(
+			this.app,
+			() => this.settings.porygonFolder,
+			(key) => isFeatureEnabled(this.settings, key),
+		);
 		this.ragStore = new RagIndexedDbStore(this.app);
 		this.ragIndexer = new RagIndexer(this.app, this.settings, this.ragStore);
 		this.ragSemanticSearch = new RagSemanticSearchService(this.settings, this.ragStore);

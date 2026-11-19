@@ -4,6 +4,7 @@ import PorygonPlugin from "../main";
 import { getActiveProvider } from "../providers";
 import { RagIndexProgress } from "../rag";
 import { movePorygonFolder, DEFAULT_PORYGON_FOLDER, ONBOARDING_DEFAULTS } from "./settings";
+import { FEATURE_FLAGS, isFeatureFlagKey } from "./feature-flags";
 import type { ThinkingEffort } from "./settings";
 
 type ModelSettingKey = "ollamaChatModel" | "ollamaEmbeddingModel";
@@ -194,6 +195,15 @@ export class PorygonSettingTab extends PluginSettingTab {
 					},
 				],
 			},
+			{
+				type: "group",
+				heading: "Experimental",
+				items: FEATURE_FLAGS.map((flag): SettingDefinition => ({
+					name: flag.name,
+					desc: flag.description,
+					control: { key: flag.key, type: "toggle" },
+				})),
+			},
 		];
 	}
 
@@ -205,6 +215,11 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const settings = this.plugin.settings as unknown as Record<string, unknown>;
 		settings[key] = value;
 		await this.plugin.saveSettings();
+		// Turning an experimental flag on has to seed its bundled skill now,
+		// not on the next reload.
+		if (value === true && isFeatureFlagKey(key)) {
+			await this.plugin.skills.syncBundledSkills();
+		}
 	}
 
 	private refresh(): void {
@@ -404,6 +419,26 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const advancedGroup = containerEl.createDiv({ cls: "setting-group" });
 		const advancedItems = advancedGroup.createDiv({ cls: "setting-items" });
 		this.renderPorygonFolderSetting(advancedItems);
+
+		this.renderSectionHeading(containerEl, "Experimental", "Early features that may change or break. Off by default.");
+
+		const experimentalGroup = containerEl.createDiv({ cls: "setting-group" });
+		const experimentalItems = experimentalGroup.createDiv({ cls: "setting-items" });
+		for (const flag of FEATURE_FLAGS) {
+			new Setting(experimentalItems)
+				.setName(flag.name)
+				.setDesc(flag.description)
+				.addToggle((toggle) => toggle
+					.setValue(this.plugin.settings[flag.key])
+					.onChange(async (value) => {
+						this.plugin.settings[flag.key] = value;
+						await this.plugin.saveSettings();
+						// Seed the newly enabled skill immediately.
+						if (value) {
+							await this.plugin.skills.syncBundledSkills();
+						}
+					}));
+		}
 	}
 
 	private renderPorygonFolderSetting(containerEl: HTMLElement): void {

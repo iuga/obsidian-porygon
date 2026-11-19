@@ -1,7 +1,9 @@
 import { App, debounce, Debouncer, getFrontMatterInfo, normalizePath, parseYaml, TAbstractFile, TFile, TFolder } from "obsidian";
 import summarizerSkill from "../../skills/summarizer.md";
 import explainerSkill from "../../skills/explainer.md";
+import diagrammerSkill from "../../skills/diagrammer.md";
 import { ensureFolderExists } from "../utils/vault";
+import { featureFlagForSkill, type FeatureFlagKey } from "../settings/feature-flags";
 
 export interface AgentSkill {
 	name: string;
@@ -12,6 +14,9 @@ export interface AgentSkill {
 interface BundledSkill {
 	filename: string;
 	content: string;
+	// Seeded even when the skills folder already existed, so installs that
+	// predate the skill still receive it. Still never overwrites a file.
+	seedOnUpgrade?: boolean;
 }
 
 interface ParsedSkillMarkdown {
@@ -21,9 +26,12 @@ interface ParsedSkillMarkdown {
 
 const SKILLS_SUBFOLDER = "skills";
 const REFRESH_DEBOUNCE_MS = 400;
+// Each filename matches the skill's frontmatter name; that name is the key the
+// feature-flag registry uses to gate a bundled skill.
 const BUNDLED_SKILLS: BundledSkill[] = [
 	{ filename: "summarizer.md", content: summarizerSkill },
 	{ filename: "explainer.md", content: explainerSkill},
+	{ filename: "diagrammer.md", content: diagrammerSkill, seedOnUpgrade: true },
 ];
 
 export class SkillsService {
@@ -34,14 +42,24 @@ export class SkillsService {
 	constructor(
 		private readonly app: App,
 		private readonly getPorygonFolder: () => string,
+		private readonly isFeatureEnabled: (key: FeatureFlagKey) => boolean,
 	) {
 		this.debouncedRefresh = debounce(() => { void this.refresh(); }, REFRESH_DEBOUNCE_MS, true);
 	}
 
 	async initialize(): Promise<void> {
-		await ensureBundledSkills(this.app, this.getSkillsFolder());
-		await this.refresh();
+		await this.syncBundledSkills();
 		this.initialized = true;
+	}
+
+	/**
+	 * Seeds missing bundled skills and re-discovers the folder. Safe to call
+	 * more than once; used at load and after an experimental flag is turned on
+	 * so the newly enabled skill appears without a reload.
+	 */
+	async syncBundledSkills(): Promise<void> {
+		await ensureBundledSkills(this.app, this.getSkillsFolder(), this.isFeatureEnabled);
+		await this.refresh();
 	}
 
 	getSkills(): readonly AgentSkill[] {
@@ -109,19 +127,37 @@ export function buildAvailableSkillsPrompt(skills: readonly AgentSkill[]): strin
 	return `<available_skills>\n${body}\n</available_skills>`;
 }
 
-async function ensureBundledSkills(app: App, skillsFolder: string): Promise<void> {
+async function ensureBundledSkills(
+	app: App,
+	skillsFolder: string,
+	isFeatureEnabled: (key: FeatureFlagKey) => boolean,
+): Promise<void> {
 	const normalizedFolderPath = normalizePath(skillsFolder);
 	const folderExistedBefore = app.vault.getAbstractFileByPath(normalizedFolderPath) instanceof TFolder;
 
 	await ensureFolderExists(app, skillsFolder);
 
-	// Only seed bundled skills on first run. If the user deletes a bundled
-	// skill after that, we respect their choice and don't re-create it.
-	if (folderExistedBefore) {
-		return;
-	}
-
+	// Seed all bundled skills on first run. On later runs only skills marked
+	// `seedOnUpgrade` are created when missing, so existing installs receive
+	// newly shipped skills. An existing file is never overwritten, because the
+	// user may have edited it. Deleting a non-`seedOnUpgrade` skill is
+	// respected; a deleted `seedOnUpgrade` skill is re-created, so the
+	// supported way to turn that capability off is its settings toggle.
+	//
+	// Experimental skills stay completely inert while their flag is off: the
+	// registry entry names the skill it gates, and nothing is seeded on
+	// install or upgrade when that flag is disabled.
 	for (const skill of BUNDLED_SKILLS) {
+		const skillName = skill.filename.replace(/\.md$/i, "");
+		const flag = featureFlagForSkill(skillName);
+		if (flag !== undefined && !isFeatureEnabled(flag)) {
+			continue;
+		}
+
+		if (folderExistedBefore && !skill.seedOnUpgrade) {
+			continue;
+		}
+
 		const path = normalizePath(`${skillsFolder}/${skill.filename}`);
 		if (app.vault.getAbstractFileByPath(path)) {
 			continue;
