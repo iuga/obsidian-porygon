@@ -1879,6 +1879,7 @@ export class PorygonView extends ItemView {
 				messages: agentMessages,
 				skills: this.plugin.skills,
 				sessionId: this.currentSessionId,
+				pluginVersion: this.plugin.manifest.version,
 				memoriesStore: {
 					get: () => this.plugin.settings.memories,
 					set: async (raw) => {

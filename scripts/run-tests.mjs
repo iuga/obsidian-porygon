@@ -46,7 +46,12 @@ try {
 		.map((file) => path.join(outdir, file));
 
 	const exitCode = await new Promise((resolve) => {
-		const child = spawn(process.execPath, ["--test", ...testFiles], { stdio: "inherit" });
+		const child = spawn(process.execPath, ["--test", ...testFiles], {
+			stdio: "inherit",
+			// Date formatting tests assert exact local timestamps, so pin the
+			// test process to UTC instead of depending on the developer's zone.
+			env: { ...process.env, TZ: "UTC" },
+		});
 		child.on("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
 	});
 

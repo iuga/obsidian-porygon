@@ -62,6 +62,7 @@ export interface LocalAgentOptions {
 	skills: SkillsService;
 	sessionId: string;
 	memoriesStore: MemoriesStore;
+	pluginVersion: string;
 	signal?: AbortSignal;
 }
 
@@ -98,6 +99,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 		personalPrompt: options.settings.personalPrompt,
 		highlightrDetected: isHighlightrEnabled(options.app),
 		featureFlags: options.settings,
+		pluginVersion: options.pluginVersion,
 	});
 
 	if (!agent) {

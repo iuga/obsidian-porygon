@@ -1,5 +1,6 @@
-import { Platform } from "obsidian";
+import { apiVersion, Platform } from "obsidian";
 import defaultSystemPrompt from "../../prompts/system.md";
+import { buildDateTimeContext } from "./datetime-context";
 import { buildMemoryPromptBlock, MemoriesStore } from "./memories";
 import { buildAvailableSkillsPrompt, SkillsService } from "./skills";
 import { filterAvailableSkills } from "./skill-visibility";
@@ -13,6 +14,7 @@ export interface SystemPromptInputs {
 	personalPrompt: string;
 	highlightrDetected: boolean;
 	featureFlags: FeatureFlagSettings;
+	pluginVersion?: string;
 }
 
 // Highlightr's full default palette (8 colors) versus the four base colors
@@ -21,11 +23,11 @@ export interface SystemPromptInputs {
 const FULL_HIGHLIGHT_PALETTE = "blue, red, yellow, green, pink, orange, cyan, purple, grey";
 const BASE_HIGHLIGHT_PALETTE = "blue, red, yellow, green";
 
-export function buildSystemPrompt({ skills, memoriesStore, personalPrompt, highlightrDetected, featureFlags }: SystemPromptInputs): string {
+export function buildSystemPrompt({ skills, memoriesStore, personalPrompt, highlightrDetected, featureFlags, pluginVersion }: SystemPromptInputs): string {
 	const skillsPrompt = buildAvailableSkillsPrompt(
 		filterAvailableSkills(skills.getSkills(), featureFlags),
 	);
-	const contextPrompt = buildContextPromptBlock();
+	const contextPrompt = buildContextPromptBlock(pluginVersion);
 	const memoryPrompt = buildMemoryPromptBlock(memoriesStore.get());
 	const highlightPrompt = buildHighlightPromptBlock(highlightrDetected);
 	const trimmedPersonalPrompt = personalPrompt.trim();
@@ -59,29 +61,32 @@ Rules:
 </highlights-emphasis>`;
 }
 
-function buildContextPromptBlock(): string {
-	const now = new Date();
-	const datetimeUtc = now.toISOString();
-	const datetimeLocal = formatLocalDatetime(now);
-	const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
-	const currentOs = detectOs();
-	return `<context>\n- datetime: ${datetimeLocal}\n- datetime_utc: ${datetimeUtc}\n- tz: ${timezone}\n- os: ${currentOs}\n</context>`;
+function buildContextPromptBlock(pluginVersion?: string): string {
+	return buildDateTimeContext({
+		platform: describePlatform(),
+		pluginVersion,
+		obsidianApiVersion: apiVersion,
+	});
 }
 
-function formatLocalDatetime(date: Date): string {
-	const pad = (value: number) => value.toString().padStart(2, "0");
-	const offsetMinutes = -date.getTimezoneOffset();
-	const offsetSign = offsetMinutes >= 0 ? "+" : "-";
-	const absOffset = Math.abs(offsetMinutes);
-	const offset = `${offsetSign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
-	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset}`;
+function describePlatform(): string {
+	return `${detectOsLabel()} (${describeMode()})`;
 }
 
-function detectOs(): string {
-	if (Platform.isMacOS) return "macos";
-	if (Platform.isWin) return "windows";
-	if (Platform.isLinux) return "linux";
-	if (Platform.isIosApp) return "ios";
-	if (Platform.isAndroidApp) return "android";
+function detectOsLabel(): string {
+	// iOS reports isMacOS too, so check the mobile app flags first.
+	if (Platform.isIosApp) return "iOS";
+	if (Platform.isAndroidApp) return "Android";
+	if (Platform.isMacOS) return "macOS";
+	if (Platform.isWin) return "Windows";
+	if (Platform.isLinux) return "Linux";
+	return "unknown";
+}
+
+function describeMode(): string {
+	if (Platform.isPhone) return "phone";
+	if (Platform.isTablet) return "tablet";
+	if (Platform.isMobileApp) return "mobile";
+	if (Platform.isDesktopApp || Platform.isDesktop) return "desktop";
 	return "unknown";
 }
