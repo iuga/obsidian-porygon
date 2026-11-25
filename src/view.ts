@@ -199,8 +199,8 @@ export class PorygonView extends ItemView {
 	// True after the user dismisses the tip on the current welcome screen, so
 	// nothing else is shown until that screen is rendered again.
 	private whatsNewDismissedForWelcome = false;
-	// Mirror of the sessionStorage dismissals so dismissing still works when
-	// storage is unavailable (private mode, quota).
+	// Mirror of the persisted (localStorage) dismissals so dismissing still
+	// works when storage is unavailable (private mode, quota).
 	private whatsNewDismissed = new Set<string>();
 	// Latest usage_metadata total for the active session (null until the first
 	// reply). The context meter's numerator; the denominator (the model's max
@@ -327,8 +327,8 @@ export class PorygonView extends ItemView {
 		// always renders directly above the input box — below the welcome quote,
 		// never inside the composer and never scrolling with the messages.
 		// Create it before rendering so the first sync mounts into the live slot.
-		// A fresh welcome screen: a tip dismissed earlier in the session may
-		// appear again.
+		// A fresh welcome screen: a dismissed tip is remembered, so the next one
+		// shown is an undismissed feature picked at random.
 		this.whatsNewDismissedForWelcome = false;
 		this.whatsNewSlotEl = main.createDiv({ cls: "porygon-whats-new-slot" });
 		this.renderMessages();
@@ -435,7 +435,7 @@ export class PorygonView extends ItemView {
 
 	private getWhatsNewStorage(): Storage | null {
 		try {
-			return window.sessionStorage;
+			return window.localStorage;
 		} catch {
 			return null;
 		}

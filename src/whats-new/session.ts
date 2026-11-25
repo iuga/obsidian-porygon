@@ -29,7 +29,7 @@ export function readDismissed(storage: Storage | null): Set<string> {
 	}
 }
 
-/** Marks a feature as dismissed for the rest of the Obsidian session. */
+/** Marks a feature as dismissed so it isn't shown again (across restarts). */
 export function dismiss(storage: Storage | null, id: string): void {
 	if (!storage) {
 		return;
