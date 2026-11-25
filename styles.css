@@ -51,6 +51,75 @@
 	text-align: center;
 }
 
+/* Row directly above the composer. Collapses when there is no tip. */
+.porygon-whats-new-slot {
+	flex: 0 0 auto;
+	margin: 0 var(--size-4-3);
+}
+
+.porygon-whats-new-slot:empty {
+	display: none;
+}
+
+.porygon-whats-new-card {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+	max-width: 46em;
+	margin: 0 auto;
+	padding: var(--size-4-3);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background-color: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 400;
+	line-height: 1.4;
+	text-align: left;
+}
+
+.porygon-whats-new-icon {
+	display: flex;
+	flex: 0 0 auto;
+	margin-top: 1px;
+	color: var(--text-faint);
+}
+
+.porygon-whats-new-icon .svg-icon {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+.porygon-whats-new-text {
+	flex: 1;
+}
+
+.porygon-whats-new-close.porygon-whats-new-close {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 1.5em;
+	height: 1.5em;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-s);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-faint);
+	cursor: pointer;
+}
+
+.porygon-whats-new-close.porygon-whats-new-close:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.porygon-whats-new-close.porygon-whats-new-close .svg-icon {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
 .porygon-message-row {
 	display: flex;
 }

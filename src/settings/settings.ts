@@ -19,6 +19,7 @@ export interface PorygonPluginSettings extends FeatureFlagSettings {
 	showThinking: boolean;
 	showToolUsage: boolean;
 	showTokenStats: boolean;
+	showWhatsNew: boolean;
 	yolo: boolean;
 	experience: ExperiencePreset;
 	ragIgnoredPaths: string;
@@ -40,6 +41,7 @@ export const DEFAULT_SETTINGS: PorygonPluginSettings = {
 	showThinking: false,
 	showToolUsage: false,
 	showTokenStats: false,
+	showWhatsNew: true,
 	yolo: false,
 	experience: "",
 	ragIgnoredPaths: "",
@@ -57,6 +59,7 @@ export const ONBOARDING_DEFAULTS: PorygonPluginSettings = {
 	showThinking: true,
 	showToolUsage: false,
 	showTokenStats: false,
+	showWhatsNew: true,
 	yolo: false,
 	experience: "verbose",
 	ragIgnoredPaths: "",

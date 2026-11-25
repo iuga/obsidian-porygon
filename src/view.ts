@@ -7,6 +7,9 @@ import { ChatList } from "./chat/chat-list";
 import { stripSlashTrigger } from "./chat/composer-slash";
 import { isThinkingExpanded } from "./chat/thinking-state";
 import { ChatMessage, MentionedFile, MentionedItem, MentionType } from "./chat/types";
+import { renderWhatsNewCard } from "./whats-new/card";
+import { WHATS_NEW_FEATURES, type WhatsNewFeature } from "./whats-new/features";
+import { dismiss as dismissWhatsNew, pickFeature, readDismissed } from "./whats-new/session";
 import { getActiveProvider } from "./providers";
 import { PopoverHost } from "./ui/popover";
 import { ensureFolderExists } from "./utils/vault";
@@ -187,6 +190,18 @@ export class PorygonView extends ItemView {
 	private streamingMessage: ChatMessage | null = null;
 	private streamAbortController: AbortController | null = null;
 	private chatList: ChatList | null = null;
+	// Id of the tip currently shown on the empty chat screen. Kept across
+	// re-renders so the same tip doesn't flicker to another one.
+	private whatsNewId: string | null = null;
+	private whatsNewEl: HTMLElement | null = null;
+	// Slot directly above the composer where the tip is mounted.
+	private whatsNewSlotEl: HTMLElement | null = null;
+	// True after the user dismisses the tip on the current welcome screen, so
+	// nothing else is shown until that screen is rendered again.
+	private whatsNewDismissedForWelcome = false;
+	// Mirror of the sessionStorage dismissals so dismissing still works when
+	// storage is unavailable (private mode, quota).
+	private whatsNewDismissed = new Set<string>();
 	// Latest usage_metadata total for the active session (null until the first
 	// reply). The context meter's numerator; the denominator (the model's max
 	// window) lives on the plugin and is resolved only on load / model change.
@@ -309,6 +324,10 @@ export class PorygonView extends ItemView {
 		const main = this.contentEl.createDiv({ cls: "porygon-main" });
 		this.chatHistoryEl = main.createDiv({ cls: "porygon-chat-history" });
 		this.renderMessages();
+		// A fresh welcome screen: a tip dismissed earlier in the session may
+		// appear again.
+		this.whatsNewDismissedForWelcome = false;
+		this.whatsNewSlotEl = main.createDiv({ cls: "porygon-whats-new-slot" });
 		this.renderComposer(main);
 		this.updateStreamingIndicator();
 		void this.updateHealthStatus();
@@ -329,6 +348,101 @@ export class PorygonView extends ItemView {
 		}
 		const emptyQuote = this.messages.length === 0 ? this.getDailyEmptyChatQuote() : undefined;
 		this.chatList.setMessages(this.messages, emptyQuote);
+		this.syncWhatsNewCard();
+	}
+
+	/**
+	 * Keeps the "what's new" tip in sync with the empty chat state. Idempotent:
+	 * safe to call on every render and on every settings save.
+	 */
+	private syncWhatsNewCard(): void {
+		const slotEl = this.whatsNewSlotEl;
+		if (
+			!this.plugin.settings.showWhatsNew ||
+			this.messages.length > 0 ||
+			!slotEl ||
+			this.whatsNewDismissedForWelcome
+		) {
+			this.hideWhatsNewCard();
+			return;
+		}
+
+		if (this.whatsNewEl && this.whatsNewEl.parentElement === slotEl) {
+			return;
+		}
+
+		this.mountWhatsNewCard(slotEl);
+	}
+
+	private mountWhatsNewCard(containerEl: HTMLElement): void {
+		this.removeWhatsNewCardElement();
+		const feature = this.currentOrNextWhatsNew(this.getDismissedWhatsNew());
+		if (!feature) {
+			this.whatsNewId = null;
+			return;
+		}
+
+		this.showWhatsNewCard(containerEl, feature);
+	}
+
+	/**
+	 * Keeps the current tip stable across re-renders (health checks, session
+	 * refreshes) instead of re-randomizing it, as long as it wasn't dismissed.
+	 */
+	private currentOrNextWhatsNew(dismissed: ReadonlySet<string>): WhatsNewFeature | undefined {
+		const current = this.whatsNewId
+			? WHATS_NEW_FEATURES.find((feature) => feature.id === this.whatsNewId)
+			: undefined;
+		if (current && !dismissed.has(current.id)) {
+			return current;
+		}
+
+		return pickFeature(WHATS_NEW_FEATURES, dismissed);
+	}
+
+	private showWhatsNewCard(containerEl: HTMLElement, feature: WhatsNewFeature): void {
+		this.whatsNewId = feature.id;
+		this.whatsNewEl = renderWhatsNewCard(containerEl, feature, {
+			onDismiss: (dismissedFeature) => this.handleWhatsNewDismiss(dismissedFeature),
+		});
+	}
+
+	private handleWhatsNewDismiss(feature: WhatsNewFeature): void {
+		const storage = this.getWhatsNewStorage();
+		this.whatsNewDismissed.add(feature.id);
+		dismissWhatsNew(storage, feature.id);
+
+		// Nothing else is shown on this welcome screen; the next one picks a
+		// new random feature.
+		this.whatsNewDismissedForWelcome = true;
+		this.whatsNewId = null;
+		this.removeWhatsNewCardElement();
+	}
+
+	private hideWhatsNewCard(): void {
+		this.whatsNewId = null;
+		this.removeWhatsNewCardElement();
+	}
+
+	private removeWhatsNewCardElement(): void {
+		this.whatsNewEl?.remove();
+		this.whatsNewEl = null;
+	}
+
+	private getWhatsNewStorage(): Storage | null {
+		try {
+			return window.sessionStorage;
+		} catch {
+			return null;
+		}
+	}
+
+	private getDismissedWhatsNew(): Set<string> {
+		const dismissed = readDismissed(this.getWhatsNewStorage());
+		for (const id of this.whatsNewDismissed) {
+			dismissed.add(id);
+		}
+		return dismissed;
 	}
 
 	private getDailyEmptyChatQuote(): string {
@@ -410,6 +524,8 @@ export class PorygonView extends ItemView {
 			}
 			void this.sendCurrentMessage();
 		});
+
+		this.syncWhatsNewCard();
 	}
 
 	private renderWelcome(): void {
@@ -790,6 +906,8 @@ export class PorygonView extends ItemView {
 		this.renderMentionTags();
 		this.popoverHost.closeCurrent();
 		this.updateSendButtonState();
+		// /new renders a fresh welcome screen, so a dismissed tip may return.
+		this.whatsNewDismissedForWelcome = false;
 		this.renderMessages();
 		this.composerInputEl?.focus();
 	}
@@ -1745,6 +1863,9 @@ export class PorygonView extends ItemView {
 	// state immediately.
 	onContextSettingsChanged(): void {
 		this.updateContextUsageLabel();
+		// Toggles like "Feature tips" take effect immediately, even while the
+		// settings modal is still open.
+		this.syncWhatsNewCard();
 	}
 
 	private getSendButtonTooltip(hasMessage: boolean): string {
