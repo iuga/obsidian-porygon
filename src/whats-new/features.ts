@@ -24,6 +24,6 @@ export const WHATS_NEW_FEATURES: readonly WhatsNewFeature[] = [
 	},
 	{
 		id: "mermaid-diagrams",
-		text: "Turn a note into a diagram. Ask for a flowchart, sequence diagram, or mind map and get it rendered right in the chat, ready to reuse. (Experimental — enable it in Settings → Porygon → Experimental.)",
+		text: "Turn a note into a diagram. Ask for a flowchart, sequence diagram, or mind map and get it rendered right in the chat, ready to reuse. (Enable it in Settings → Porygon → Experimental.)",
 	},
 ];
