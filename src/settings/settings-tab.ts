@@ -193,6 +193,12 @@ export class PorygonSettingTab extends PluginSettingTab {
 						desc: "Vault folder where the assistant stores its internal notes (sessions, skills).",
 						control: { key: "porygonFolder", type: "text", placeholder: DEFAULT_PORYGON_FOLDER },
 					},
+					{
+						name: "Feature tips",
+						desc: "Show a small tip about a recent capability on the empty chat screen.",
+						aliases: ["what's new", "tips", "welcome"],
+						control: { key: "showWhatsNew", type: "toggle" },
+					},
 				],
 			},
 			{
@@ -419,6 +425,16 @@ export class PorygonSettingTab extends PluginSettingTab {
 		const advancedGroup = containerEl.createDiv({ cls: "setting-group" });
 		const advancedItems = advancedGroup.createDiv({ cls: "setting-items" });
 		this.renderPorygonFolderSetting(advancedItems);
+
+		new Setting(advancedItems)
+			.setName("Feature tips")
+			.setDesc("Show a small tip about a recent capability on the empty chat screen.")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.showWhatsNew)
+				.onChange(async (value) => {
+					this.plugin.settings.showWhatsNew = value;
+					await this.plugin.saveSettings();
+				}));
 
 		this.renderSectionHeading(containerEl, "Experimental", "Early features that may change or break. Off by default.");
 
