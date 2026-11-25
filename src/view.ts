@@ -323,11 +323,15 @@ export class PorygonView extends ItemView {
 		this.contentEl.addClass("porygon-view");
 		const main = this.contentEl.createDiv({ cls: "porygon-main" });
 		this.chatHistoryEl = main.createDiv({ cls: "porygon-chat-history" });
-		this.renderMessages();
+		// The tip slot sits between the chat history and the composer, so a tip
+		// always renders directly above the input box — below the welcome quote,
+		// never inside the composer and never scrolling with the messages.
+		// Create it before rendering so the first sync mounts into the live slot.
 		// A fresh welcome screen: a tip dismissed earlier in the session may
 		// appear again.
 		this.whatsNewDismissedForWelcome = false;
 		this.whatsNewSlotEl = main.createDiv({ cls: "porygon-whats-new-slot" });
+		this.renderMessages();
 		this.renderComposer(main);
 		this.updateStreamingIndicator();
 		void this.updateHealthStatus();
