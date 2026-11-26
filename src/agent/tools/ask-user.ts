@@ -1,34 +1,52 @@
 import { tool } from "@langchain/core/tools";
 import { interrupt } from "@langchain/langgraph";
 import { z } from "zod";
-import { AskUserInterruptPayload, intentSchema } from "./shared";
+import {
+	formatAskUserModelContent,
+	MAX_ASK_USER_DESCRIPTION_LENGTH,
+	MAX_ASK_USER_HEADER_LENGTH,
+	MAX_ASK_USER_LABEL_LENGTH,
+	MAX_ASK_USER_OPTIONS,
+	MAX_ASK_USER_QUESTIONS,
+	type AskUserQuestion,
+	type AskUserQuestionsPayload,
+	type AskUserResumeValue,
+} from "./ask-user-types";
+import { intentSchema } from "./shared";
+
+const optionSchema = z.object({
+	label: z.string().min(1).max(MAX_ASK_USER_LABEL_LENGTH).describe("Short option label, 1 to 5 words."),
+	description: z.string().max(MAX_ASK_USER_DESCRIPTION_LENGTH).optional().describe("Optional one-sentence explanation of the option."),
+});
+
+const questionSchema = z.object({
+	header: z.string().min(1).max(MAX_ASK_USER_HEADER_LENGTH).describe("Short tab/progress label for this question, at most 30 characters."),
+	question: z.string().min(1).describe("The complete question to show the user."),
+	options: z.array(optionSchema).max(MAX_ASK_USER_OPTIONS).describe("Up to 8 options. Use an empty array for a free-text-only question."),
+	multiple: z.boolean().optional().describe("True for a multi-select (checkbox) question; omit for single-select (radio)."),
+});
 
 export const askUserTool = tool(
-	async ({ question, options }: { question: string; options: string[] }): Promise<string> => {
-		// Defensive clamp: if the model produced more than 4 options, keep the
-		// first 4 and ignore the rest instead of failing the call.
-		const clampedOptions = options.slice(0, 4);
-		const payload: AskUserInterruptPayload = { question, options: clampedOptions };
-		const reply = interrupt<AskUserInterruptPayload, unknown>(payload);
-		if (typeof reply === "string") {
-			return reply;
-		}
-		if (reply === null || reply === undefined) {
-			return "";
-		}
-		try {
-			return JSON.stringify(reply);
-		} catch {
-			return "";
-		}
+	async ({ questions }: { questions: AskUserQuestion[] }): Promise<string> => {
+		const payload: AskUserQuestionsPayload = { kind: "questions", questions };
+		const reply = interrupt<AskUserQuestionsPayload, AskUserResumeValue>(payload);
+		return formatAskUserModelContent(questions, reply);
 	},
 	{
 		name: "ask_user",
-		description: "Ask the user a single question with 2 to 4 short option labels. Pauses the agent until the user replies. The user can either pick one of the options (returned verbatim as a string) or type a free-form answer (returned as whatever they typed). Phrase the question so a typed free-form reply still makes sense, not only the listed options. Use this only when you genuinely need a choice from the user to proceed; do not use it to confirm work already done or to offer a menu of next actions.",
+		description: [
+			"Ask the user one or more related questions and pause the agent until they reply.",
+			"Put all related questions in one call instead of making several sequential calls.",
+			"Never batch ask_user with any other tool call.",
+			"Each question has a short header, a complete question, and 0 to 8 options with labels and optional descriptions.",
+			"Use options: [] for a free-text question. Set multiple: true for multi-select; omit it for single-select.",
+			"A \"Type your own answer\" option is always added automatically; do not include \"Other\" or catch-all options.",
+			"If you recommend an option, put it first and append \" (Recommended)\" to its label.",
+			"Use this only when the answer changes your next action; do not use it to confirm completed work or to offer a menu of next actions.",
+		].join(" "),
 		schema: z.object({
 			intent: intentSchema,
-			question: z.string().min(1).describe("The question to show the user."),
-			options: z.array(z.string().min(1)).min(2).max(4).describe("Between 2 and 4 short option labels for the user to choose from. The user may also reply free-form."),
+			questions: z.array(questionSchema).min(1).max(MAX_ASK_USER_QUESTIONS).describe("Between 1 and 8 related questions. The UI presents them one at a time."),
 		}),
 	}
 );

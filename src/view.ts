@@ -1,5 +1,5 @@
 import { getFrontMatterInfo, ItemView, MarkdownRenderer, normalizePath, parseYaml, setIcon, stringifyYaml, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { AgentChatMessage, AskUserInterruptPayload, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
+import { AgentChatMessage, AskUserInterruptPayload, AskUserResumeValue, clearAgentMemory, generateSessionTitle, streamLocalAgent } from "./agent/agent";
 import { applyToolExecution } from "./agent/tool-events";
 import PorygonPlugin from "./main";
 import { EXPERIENCE_PRESETS, ExperiencePreset, ONBOARDING_DEFAULTS } from "./settings/settings";
@@ -11,6 +11,7 @@ import { renderWhatsNewCard } from "./whats-new/card";
 import { WHATS_NEW_FEATURES, type WhatsNewFeature } from "./whats-new/features";
 import { dismiss as dismissWhatsNew, pickFeature, readDismissed } from "./whats-new/session";
 import { getActiveProvider } from "./providers";
+import { buildAskUserWizard } from "./ui/ask-user-wizard";
 import { PopoverHost } from "./ui/popover";
 import { ensureFolderExists } from "./utils/vault";
 
@@ -175,7 +176,8 @@ export class PorygonView extends ItemView {
 	private isLoadingSessions = false;
 	private sessionLoadToken = 0;
 	private sessionRefreshHandle: number | null = null;
-	private askResolve: ((reply: string) => void) | null = null;
+	private askResolve: ((reply: AskUserResumeValue) => void) | null = null;
+	private pendingAskPayload: AskUserInterruptPayload | null = null;
 	private currentSessionId: string | null = null;
 	private currentSessionTitle = "";
 	private autosaveQueue: Promise<void> = Promise.resolve();
@@ -913,7 +915,7 @@ export class PorygonView extends ItemView {
 		// /new renders a fresh welcome screen, so a dismissed tip may return.
 		this.whatsNewDismissedForWelcome = false;
 		this.renderMessages();
-		this.composerInputEl?.focus();
+		this.focusComposer();
 	}
 
 	private renderMentionTags(): void {
@@ -995,7 +997,7 @@ export class PorygonView extends ItemView {
 			event.preventDefault();
 			event.stopPropagation();
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 			return;
 		}
 
@@ -1023,7 +1025,7 @@ export class PorygonView extends ItemView {
 			}
 
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 		}
 	}
 
@@ -1134,7 +1136,7 @@ export class PorygonView extends ItemView {
 	private addMentionedItem(result: MentionSearchResult): void {
 		if (this.getUnavailableMentionPaths().has(result.path)) {
 			this.popoverHost.closeCurrent();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 			return;
 		}
 
@@ -1144,7 +1146,7 @@ export class PorygonView extends ItemView {
 		this.renderMentionTags();
 		this.updateSendButtonState();
 		this.popoverHost.closeCurrent();
-		this.composerInputEl?.focus();
+		this.focusComposer();
 	}
 
 	private insertMentionLink(mention: MentionedItem): void {
@@ -1191,7 +1193,7 @@ export class PorygonView extends ItemView {
 		this.selectedMentions = this.selectedMentions.filter((selectedMention) => selectedMention.path !== path);
 		this.renderMentionTags();
 		this.updateSendButtonState();
-		this.composerInputEl?.focus();
+		this.focusComposer();
 	}
 
 	private renderSlashCommandPopover(composerEl: HTMLElement): void {
@@ -1227,7 +1229,7 @@ export class PorygonView extends ItemView {
 			event.preventDefault();
 			event.stopPropagation();
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 			return;
 		}
 
@@ -1255,7 +1257,7 @@ export class PorygonView extends ItemView {
 			}
 
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 		}
 	}
 
@@ -1318,7 +1320,7 @@ export class PorygonView extends ItemView {
 		// Consume the trigger before closing, since onClose clears the index.
 		this.stripSlashTriggerFromComposer();
 		this.popoverHost.closeCurrent();
-		this.composerInputEl?.focus();
+		this.focusComposer();
 
 		if (command.id === "new") {
 			void this.handleNewConversationCommand();
@@ -1578,7 +1580,7 @@ export class PorygonView extends ItemView {
 			event.preventDefault();
 			event.stopPropagation();
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 			return;
 		}
 
@@ -1606,7 +1608,7 @@ export class PorygonView extends ItemView {
 			}
 
 			requestClose();
-			this.composerInputEl?.focus();
+			this.focusComposer();
 		}
 	}
 
@@ -1621,11 +1623,14 @@ export class PorygonView extends ItemView {
 		selectedEl?.scrollIntoView({ block: "nearest" });
 	}
 
-	private handleAskUser(payload: AskUserInterruptPayload): Promise<string> {
+	private handleAskUser(payload: AskUserInterruptPayload): Promise<AskUserResumeValue> {
 		return new Promise((resolve) => {
 			this.askResolve = resolve;
+			this.pendingAskPayload = payload;
 			if (!this.composerEl) {
-				resolve("");
+				this.askResolve = null;
+				this.pendingAskPayload = null;
+				resolve(this.defaultAskReply(payload));
 				return;
 			}
 
@@ -1635,125 +1640,59 @@ export class PorygonView extends ItemView {
 
 	private renderAskUserPopover(composerEl: HTMLElement, payload: AskUserInterruptPayload): void {
 		this.popoverHost.open(POPOVER_ASK, composerEl, "porygon-ask-popover", ({ rootEl }) => {
-			const panel = rootEl.createDiv({ cls: "porygon-ask-panel" });
-			panel.createDiv({ cls: "porygon-ask-question", text: payload.question });
-
-			const optionsEl = panel.createDiv({ cls: "porygon-ask-options" });
-			const optionButtons: HTMLButtonElement[] = [];
-			let selectedIndex = 0;
-			const setSelected = (next: number) => {
-				selectedIndex = (next + optionButtons.length) % optionButtons.length;
-				optionButtons.forEach((btn, i) => btn.toggleClass("is-selected", i === selectedIndex));
-			};
-			payload.options.forEach((option, index) => {
-				const button = optionsEl.createEl("button", {
-					cls: "porygon-ask-option",
-					attr: { type: "button", title: option, "aria-label": option },
-				});
-				button.createSpan({ cls: "porygon-ask-option-index", text: String(index + 1) });
-				button.createSpan({ cls: "porygon-ask-option-label", text: option });
-				button.addEventListener("mouseenter", () => setSelected(index));
-				button.addEventListener("click", (event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					this.resolveAskUser(option);
-				});
-				optionButtons.push(button);
+			return buildAskUserWizard(rootEl, payload, {
+				resolve: (reply) => this.resolveAskUser(reply),
+				onClose: () => this.handleAskPopoverClosed(),
 			});
-			setSelected(0);
-
-			const inputRow = panel.createDiv({ cls: "porygon-ask-input-row" });
-			const inputIcon = inputRow.createDiv({ cls: "porygon-ask-input-icon" });
-			setIcon(inputIcon, "pencil");
-			const input = inputRow.createEl("input", {
-				cls: "porygon-ask-input",
-				attr: { type: "text", placeholder: "Something else..." },
-			});
-			const submitButton = inputRow.createEl("button", {
-				cls: "porygon-send-button is-healthy",
-				attr: { type: "button", title: "Send reply", "aria-label": "Send reply" },
-			});
-			setIcon(submitButton, "send-horizontal");
-
-			const submit = () => {
-				const value = input.value.trim();
-				if (!value) {
-					return;
-				}
-				this.resolveAskUser(value);
-			};
-
-			submitButton.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				submit();
-			});
-
-			input.addEventListener("keydown", (event) => {
-				if (event.key === "Enter" && !event.shiftKey) {
-					event.preventDefault();
-					if (input.value.trim()) {
-						submit();
-					} else {
-						const selected = payload.options[selectedIndex];
-						if (selected) {
-							this.resolveAskUser(selected);
-						}
-					}
-					return;
-				}
-
-				if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !input.value) {
-					event.preventDefault();
-					setSelected(selectedIndex + (event.key === "ArrowDown" ? 1 : -1));
-					return;
-				}
-
-				if (event.key >= "1" && event.key <= "9" && !input.value) {
-					const numeric = Number(event.key);
-					if (numeric <= payload.options.length) {
-						event.preventDefault();
-						const option = payload.options[numeric - 1];
-						if (option) {
-							this.resolveAskUser(option);
-						}
-					}
-				}
-			});
-
-			input.focus();
-
-			return {
-				closeOnOutsideClick: false,
-				onKeydown: (event) => {
-					if (event.key !== "Escape") {
-						return;
-					}
-					const target = event.target;
-					if (target instanceof HTMLElement && rootEl.contains(target)) {
-						event.preventDefault();
-						event.stopPropagation();
-						this.resolveAskUser("User ignored the question/approval");
-					}
-				},
-				onClose: () => {
-					if (this.askResolve) {
-						const resolve = this.askResolve;
-						this.askResolve = null;
-						resolve("");
-					}
-				},
-			};
 		});
+
+		// If the builder threw, the host cleans up without firing onClose.
+		// Settle the parked promise instead of leaving the turn hanging.
+		if (this.askResolve && !this.popoverHost.isOpen(POPOVER_ASK)) {
+			this.handleAskPopoverClosed();
+		}
 	}
 
-	private resolveAskUser(reply: string): void {
+	// A popover closed by anything other than an explicit reply must still
+	// settle the parked tool promise, otherwise the turn hangs.
+	private handleAskPopoverClosed(): void {
+		if (!this.askResolve) {
+			return;
+		}
+
+		const resolve = this.askResolve;
+		const payload = this.pendingAskPayload;
+		this.askResolve = null;
+		this.pendingAskPayload = null;
+		resolve?.(this.defaultAskReply(payload));
+	}
+
+	private defaultAskReply(payload: AskUserInterruptPayload | null): AskUserResumeValue {
+		if (!payload || payload.kind === "approval") {
+			return "";
+		}
+		return { answers: payload.questions.map(() => []), dismissed: true };
+	}
+
+	private resolveAskUser(reply: AskUserResumeValue): void {
 		const resolve = this.askResolve;
 		this.askResolve = null;
+		this.pendingAskPayload = null;
+		// Close first so the composer only regains focus after the wizard is gone.
 		this.popoverHost.closeCurrent();
 		resolve?.(reply);
+		this.focusComposer();
+	}
+
+	// While an ask prompt is parked, nothing else may steal focus back to the
+	// composer: that is what made the custom field appear to lose focus.
+	private focusComposer(): void {
+		if (this.askResolve || this.popoverHost.isOpen(POPOVER_ASK)) {
+			return;
+		}
 		this.composerInputEl?.focus();
 	}
+
 
 	private showFeedback(type: FeedbackType, markdown: string, cta?: FeedbackCallToAction): void {
 		if (!this.composerEl) {
@@ -2142,18 +2081,22 @@ export class PorygonView extends ItemView {
 	// button clear immediately. The superseded turn's async tail is neutered
 	// by the isCurrentTurn() guard in sendCurrentMessage().
 	private stopActiveStream(): void {
-		if (!this.isStreaming) {
-			return;
-		}
-		this.streamAbortController?.abort();
+		// Settle a parked ask prompt even if streaming state is already clear,
+		// so the pending tool promise can never hang.
 		if (this.askResolve) {
 			const resolve = this.askResolve;
+			const payload = this.pendingAskPayload;
 			this.askResolve = null;
-			resolve("");
+			this.pendingAskPayload = null;
+			resolve?.(this.defaultAskReply(payload));
 		}
 		if (this.popoverHost.isOpen(POPOVER_ASK)) {
 			this.popoverHost.closeCurrent();
 		}
+		if (!this.isStreaming) {
+			return;
+		}
+		this.streamAbortController?.abort();
 		this.isStreaming = false;
 		this.streamAbortController = null;
 		this.streamingMessage = null;
@@ -2439,7 +2382,7 @@ export class PorygonView extends ItemView {
 			if (lastUserMessage) {
 				this.chatList?.pinMessageToTop(lastUserMessage);
 			}
-			this.composerInputEl?.focus();
+			this.focusComposer();
 		} catch (error) {
 			this.messages.push({ role: "warning", content: error instanceof Error ? error.message : String(error) });
 			this.renderMessages();
