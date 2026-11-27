@@ -6,6 +6,7 @@
 // Digit keys are never treated as option shortcuts (that bug lost focus and
 // submitted early in the previous implementation).
 
+import { setIcon } from "obsidian";
 import {
 	APPROVE_LABEL,
 	type AskUserApprovalPayload,
@@ -17,7 +18,6 @@ import {
 	buildAnswers,
 	createWizardState,
 	dismiss,
-	goBack,
 	goNext,
 	isAnswered,
 	pickOption,
@@ -55,7 +55,7 @@ interface CustomRowHandlers {
 
 interface CustomRowElements {
 	row: HTMLElement;
-	indicator: HTMLButtonElement;
+	indicator: HTMLButtonElement | null;
 	textarea: HTMLTextAreaElement;
 }
 
@@ -65,32 +65,38 @@ function createCustomRow(
 	value: string,
 	selected: boolean,
 	handlers: CustomRowHandlers,
+	showIndicator = true,
 ): CustomRowElements {
-	const row = parentEl.createDiv({ cls: "porygon-ask-custom-row" });
-	const indicator = row.createEl("button", {
-		cls: "porygon-ask-custom-indicator",
-		attr: {
-			type: "button",
-			role: multiple ? "checkbox" : "radio",
-			"aria-checked": String(selected),
-			title: "Type your own answer",
-			"aria-label": "Type your own answer",
-		},
+	const row = parentEl.createDiv({
+		cls: showIndicator ? "porygon-ask-custom-row" : "porygon-ask-custom-row porygon-ask-free-text",
 	});
-	indicator.toggleClass("is-selected", selected);
+	const placeholder = showIndicator ? "Type your own answer" : "Type your answer";
+	const indicator = showIndicator
+		? row.createEl("button", {
+			cls: "porygon-ask-custom-indicator",
+			attr: {
+				type: "button",
+				role: multiple ? "checkbox" : "radio",
+				"aria-checked": String(selected),
+				title: "Type your own answer",
+				"aria-label": "Type your own answer",
+			},
+		})
+		: null;
+	indicator?.toggleClass("is-selected", selected);
 
 	const textarea = row.createEl("textarea", {
 		cls: "porygon-ask-custom-input",
 		attr: {
 			rows: "1",
-			placeholder: "Type your own answer",
-			"aria-label": "Type your own answer",
+			placeholder,
+			"aria-label": placeholder,
 		},
 	});
 	textarea.value = value;
 	autoGrow(textarea);
 
-	indicator.addEventListener("click", (event) => {
+	indicator?.addEventListener("click", (event) => {
 		event.preventDefault();
 		event.stopPropagation();
 		handlers.toggle();
@@ -117,12 +123,54 @@ function createCustomRow(
 	return { row, indicator, textarea };
 }
 
+function canNavigateWithArrow(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) {
+		return true;
+	}
+
+	// Arrows move the caret once there is text to edit. An empty field has no
+	// caret position to preserve, so they navigate between questions instead.
+	if (target.instanceOf(HTMLTextAreaElement) || target.instanceOf(HTMLInputElement)) {
+		return target.value.length === 0;
+	}
+
+	return !target.isContentEditable;
+}
+
+function createCloseButton(parentEl: HTMLElement, onClose: () => void): HTMLButtonElement {
+	const button = parentEl.createEl("button", {
+		cls: "porygon-ask-close",
+		attr: { type: "button", title: "Close", "aria-label": "Close" },
+	});
+	setIcon(button, "x");
+	button.addEventListener("click", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		onClose();
+	});
+	return button;
+}
+
 function createFooterButton(parentEl: HTMLElement, text: string, cls: string): HTMLButtonElement {
 	return parentEl.createEl("button", {
 		cls: `porygon-ask-footer-button ${cls}`,
 		text,
 		attr: { type: "button" },
 	});
+}
+
+function createFooterIconButton(
+	parentEl: HTMLElement,
+	icon: string,
+	label: string,
+	cls: string,
+): HTMLButtonElement {
+	const button = parentEl.createEl("button", {
+		cls: `porygon-ask-footer-button porygon-ask-icon-button ${cls}`,
+		attr: { type: "button", title: label, "aria-label": label },
+	});
+	setIcon(button, icon);
+	return button;
 }
 
 function createQuestionsWizard(
@@ -135,15 +183,18 @@ function createQuestionsWizard(
 
 	const headerEl = panelEl.createDiv({ cls: "porygon-ask-header" });
 	const titleEl = headerEl.createDiv({ cls: "porygon-ask-title" });
-	const progressEl = headerEl.createDiv({ cls: "porygon-ask-progress" });
+	const headerActions = headerEl.createDiv({ cls: "porygon-ask-header-actions" });
+	const progressEl = headerActions.createDiv({ cls: "porygon-ask-progress" });
 	const bodyEl = panelEl.createDiv({ cls: "porygon-ask-body" });
 	const footerEl = panelEl.createDiv({ cls: "porygon-ask-footer" });
 
-	const dismissButton = createFooterButton(footerEl, "Dismiss", "porygon-ask-dismiss");
 	const footerActions = footerEl.createDiv({ cls: "porygon-ask-footer-actions" });
-	const backButton = createFooterButton(footerActions, "Back", "porygon-ask-back");
-	const skipButton = createFooterButton(footerActions, "Skip", "porygon-ask-skip");
-	const nextButton = createFooterButton(footerActions, "Next", "mod-cta porygon-ask-next");
+	const backButton = createFooterIconButton(footerActions, "arrow-left", "Back", "porygon-ask-back");
+	const nextButton = createFooterIconButton(footerActions, "arrow-right", "Next", "mod-cta porygon-ask-next");
+	createCloseButton(headerActions, () => {
+		dismiss(state);
+		settle(dismissalReply());
+	});
 
 	const segments: HTMLButtonElement[] = [];
 	if (total > 1) {
@@ -159,8 +210,7 @@ function createQuestionsWizard(
 			segment.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
-				state.index = index;
-				renderStep();
+				navigateTo(index);
 			});
 			segments.push(segment);
 		});
@@ -224,8 +274,12 @@ function createQuestionsWizard(
 		}
 
 		backButton.hidden = state.index === 0;
-		nextButton.setText(state.index === total - 1 ? "Submit" : "Next");
-		nextButton.disabled = !isAnswered(question, draft);
+		const nextLabel = state.index === total - 1 ? "Submit" : "Next";
+		nextButton.setAttribute("aria-label", nextLabel);
+		nextButton.setAttribute("title", nextLabel);
+		// Next stays enabled: moving on without an answer is how a question is
+		// skipped now that the dedicated Skip button is gone.
+		nextButton.disabled = false;
 	}
 
 	function focusCurrentStep(): void {
@@ -257,11 +311,35 @@ function createQuestionsWizard(
 		settle({ answers: buildAnswers(state) });
 	}
 
+	/**
+	 * Navigates away from the current question. An unanswered question is
+	 * marked skipped so the final answer stays empty unless the user returns
+	 * and edits it again.
+	 */
+	function navigateTo(index: number): void {
+		if (index === state.index || index < 0 || index >= total) {
+			return;
+		}
+
+		const question = currentQuestion();
+		const draft = currentDraft();
+		if (question && draft && !isAnswered(question, draft)) {
+			skipQuestion(state, state.index);
+		}
+
+		state.index = index;
+		renderStep();
+	}
+
 	function advance(): void {
 		const question = currentQuestion();
 		const draft = currentDraft();
-		if (!question || !draft || !isAnswered(question, draft)) {
+		if (!question || !draft) {
 			return;
+		}
+
+		if (!isAnswered(question, draft)) {
+			skipQuestion(state, state.index);
 		}
 
 		if (state.index === total - 1) {
@@ -273,16 +351,62 @@ function createQuestionsWizard(
 		renderStep();
 	}
 
-	function handleSkip(): void {
-		const isLast = state.index === total - 1;
-		skipQuestion(state, state.index);
-		if (isLast) {
-			submitAll();
+	function optionFocusTargets(): HTMLElement[] {
+		return customIndicator ? [...optionButtons, customIndicator] : [...optionButtons];
+	}
+
+	function focusOptionAtOffset(offset: number): void {
+		const targets = optionFocusTargets();
+		if (targets.length === 0) {
 			return;
 		}
 
-		goNext(state);
-		renderStep();
+		const active = document.activeElement;
+		const currentIndex = active instanceof HTMLElement ? targets.indexOf(active) : -1;
+		const startIndex = currentIndex >= 0 ? currentIndex : 0;
+		const nextIndex = (startIndex + offset + targets.length) % targets.length;
+		targets[nextIndex]?.focus();
+	}
+
+	function activateOption(optionIndex: number, advanceAfterSelect: boolean): void {
+		const question = currentQuestion();
+		const option = question?.options[optionIndex];
+		if (!question || !option) {
+			return;
+		}
+
+		pickOption(state, state.index, option.label);
+		syncSelection();
+		updateFooter();
+
+		// Enter on a single-select option also moves to the next question. A
+		// multi-select option only toggles so several answers can be picked.
+		if (advanceAfterSelect && question.multiple !== true) {
+			advance();
+		}
+	}
+
+	function handleOptionKeydown(event: KeyboardEvent, optionIndex: number | null): void {
+		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+			return;
+		}
+
+		if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+			event.preventDefault();
+			event.stopPropagation();
+			focusOptionAtOffset(event.key === "ArrowDown" ? 1 : -1);
+			return;
+		}
+
+		// The custom-answer indicator has its own click handler; let Enter
+		// trigger that instead of treating it as an option selection.
+		if (optionIndex === null || event.key !== "Enter" || event.repeat) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		activateOption(optionIndex, true);
 	}
 
 	function renderStep(): void {
@@ -301,93 +425,90 @@ function createQuestionsWizard(
 		customTextarea = null;
 
 		bodyEl.createDiv({ cls: "porygon-ask-question", text: question.question });
-		const hintText = question.options.length === 0
-			? "Type your answer"
-			: question.multiple ? "Select one or more" : "Select one";
-		bodyEl.createDiv({ cls: "porygon-ask-hint", text: hintText });
 
-		const optionsEl = bodyEl.createDiv({
-			cls: "porygon-ask-options",
-			attr: { role: question.multiple ? "group" : "radiogroup" },
-		});
+		const hasOptions = question.options.length > 0;
+		if (hasOptions) {
+			const optionsEl = bodyEl.createDiv({
+				cls: "porygon-ask-options",
+				attr: { role: question.multiple ? "group" : "radiogroup" },
+			});
 
-		question.options.forEach((option) => {
-			const selected = draft.selected.includes(option.label);
-			const button = optionsEl.createEl("button", {
-				cls: "porygon-ask-option",
-				attr: {
-					type: "button",
-					role: question.multiple ? "checkbox" : "radio",
-					"aria-checked": String(selected),
+			question.options.forEach((option, optionIndex) => {
+				const selected = draft.selected.includes(option.label);
+				const button = optionsEl.createEl("button", {
+					cls: "porygon-ask-option",
+					attr: {
+						type: "button",
+						role: question.multiple ? "checkbox" : "radio",
+						"aria-checked": String(selected),
+					},
+				});
+				button.toggleClass("is-selected", selected);
+				button.createSpan({ cls: "porygon-ask-option-indicator" });
+				const textEl = button.createSpan({ cls: "porygon-ask-option-text" });
+				textEl.createSpan({ cls: "porygon-ask-option-label", text: option.label });
+				if (option.description) {
+					textEl.createSpan({ cls: "porygon-ask-option-description", text: option.description });
+				}
+
+				button.addEventListener("click", (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					activateOption(optionIndex, false);
+				});
+
+				button.addEventListener("keydown", (event) => {
+					handleOptionKeydown(event, optionIndex);
+				});
+
+				optionButtons.push(button);
+				optionLabels.push(option.label);
+			});
+		}
+
+		const customRow = createCustomRow(
+			bodyEl,
+			question.multiple === true,
+			draft.customText,
+			draft.customSelected,
+			{
+				toggle: () => {
+					const activeDraft = currentDraft();
+					if (!activeDraft) {
+						return;
+					}
+					setCustomSelected(state, state.index, !activeDraft.customSelected);
+					syncSelection();
+					updateFooter();
+					if (activeDraft.customSelected) {
+						customRow.textarea.focus();
+					}
 				},
-			});
-			button.toggleClass("is-selected", selected);
-			button.createSpan({ cls: "porygon-ask-option-indicator" });
-			const textEl = button.createSpan({ cls: "porygon-ask-option-text" });
-			textEl.createSpan({ cls: "porygon-ask-option-label", text: option.label });
-			if (option.description) {
-				textEl.createSpan({ cls: "porygon-ask-option-description", text: option.description });
-			}
-
-			button.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				pickOption(state, state.index, option.label);
-				syncSelection();
-				updateFooter();
-			});
-
-			optionButtons.push(button);
-			optionLabels.push(option.label);
-		});
-
-		const customRow = createCustomRow(bodyEl, question.multiple === true, draft.customText, draft.customSelected, {
-			toggle: () => {
-				const activeDraft = currentDraft();
-				if (!activeDraft) {
-					return;
-				}
-				setCustomSelected(state, state.index, !activeDraft.customSelected);
-				syncSelection();
-				updateFooter();
-				if (activeDraft.customSelected) {
-					customRow.textarea.focus();
-				}
+				input: (value) => {
+					setCustomText(state, state.index, value);
+					syncSelection();
+					updateFooter();
+				},
+				enter: () => advance(),
 			},
-			input: (value) => {
-				setCustomText(state, state.index, value);
-				syncSelection();
-				updateFooter();
-			},
-			enter: () => advance(),
-		});
+			hasOptions,
+		);
 
 		customIndicator = customRow.indicator;
 		customTextarea = customRow.textarea;
+		customIndicator?.addEventListener("keydown", (event) => {
+			handleOptionKeydown(event, null);
+		});
 
 		updateProgress();
 		updateFooter();
 		scheduleFocus();
 	}
 
-	dismissButton.addEventListener("click", (event) => {
-		event.preventDefault();
-		event.stopPropagation();
-		dismiss(state);
-		settle(dismissalReply());
-	});
-
 	backButton.addEventListener("click", (event) => {
 		event.preventDefault();
 		event.stopPropagation();
-		goBack(state);
-		renderStep();
-	});
-
-	skipButton.addEventListener("click", (event) => {
-		event.preventDefault();
-		event.stopPropagation();
-		handleSkip();
+		navigateTo(state.index - 1);
 	});
 
 	nextButton.addEventListener("click", (event) => {
@@ -401,13 +522,32 @@ function createQuestionsWizard(
 	return {
 		closeOnOutsideClick: false,
 		onKeydown: (event) => {
-			if (event.key !== "Escape") {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				dismiss(state);
+				settle(dismissalReply());
 				return;
 			}
+
+			if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+				return;
+			}
+
+			// Keep caret movement intact while the user is typing.
+			if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !canNavigateWithArrow(event.target)) {
+				return;
+			}
+
+			const direction = event.key === "ArrowLeft" ? -1 : 1;
+			const targetIndex = state.index + direction;
+			if (targetIndex < 0 || targetIndex >= total) {
+				return;
+			}
+
 			event.preventDefault();
 			event.stopPropagation();
-			dismiss(state);
-			settle(dismissalReply());
+			navigateTo(targetIndex);
 		},
 		onClose: () => callbacks.onClose?.(),
 	};
@@ -421,6 +561,11 @@ function createApprovalPrompt(
 	let selected: string | null = payload.options[0] ?? APPROVE_LABEL;
 	let customText = "";
 	let customSelected = false;
+
+	const headerEl = panelEl.createDiv({ cls: "porygon-ask-header" });
+	headerEl.createDiv({ cls: "porygon-ask-title", text: "Approval" });
+	const headerActions = headerEl.createDiv({ cls: "porygon-ask-header-actions" });
+	createCloseButton(headerActions, () => callbacks.resolve(""));
 
 	panelEl.createDiv({ cls: "porygon-ask-question", text: payload.question });
 
@@ -470,7 +615,6 @@ function createApprovalPrompt(
 	});
 
 	const footerEl = panelEl.createDiv({ cls: "porygon-ask-footer" });
-	const dismissButton = createFooterButton(footerEl, "Dismiss", "porygon-ask-dismiss");
 	const footerActions = footerEl.createDiv({ cls: "porygon-ask-footer-actions" });
 	const sendButton = createFooterButton(footerActions, "Send", "mod-cta porygon-ask-send");
 
@@ -485,16 +629,10 @@ function createApprovalPrompt(
 			button.toggleClass("is-selected", isSelected);
 			button.setAttribute("aria-checked", String(isSelected));
 		});
-		customRow.indicator.toggleClass("is-selected", customSelected);
-		customRow.indicator.setAttribute("aria-checked", String(customSelected));
+		customRow.indicator?.toggleClass("is-selected", customSelected);
+		customRow.indicator?.setAttribute("aria-checked", String(customSelected));
 		sendButton.disabled = !selected && !(customSelected && customText.trim().length > 0);
 	}
-
-	dismissButton.addEventListener("click", (event) => {
-		event.preventDefault();
-		event.stopPropagation();
-		callbacks.resolve("");
-	});
 
 	sendButton.addEventListener("click", (event) => {
 		event.preventDefault();

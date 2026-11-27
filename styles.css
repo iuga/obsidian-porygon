@@ -737,6 +737,12 @@
 	background: var(--background-secondary-alt);
 }
 
+/* The ask popover sits directly above the composer; its bottom border
+   otherwise cuts into the composer's top edge. */
+.porygon-ask-popover {
+	border-bottom: 0;
+}
+
 .porygon-feedback-popover.is-error {
 	box-shadow: 0 0 0 1px var(--color-red);
 }
@@ -944,9 +950,19 @@
 	background: var(--background-modifier-hover);
 }
 
+.porygon-ask-option.porygon-ask-option:focus,
+.porygon-ask-option.porygon-ask-option:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
 .porygon-ask-option.porygon-ask-option.is-selected {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
+}
+
+.porygon-ask-option.porygon-ask-option.is-selected:focus,
+.porygon-ask-option.porygon-ask-option.is-selected:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--text-on-accent);
 }
 
 .porygon-ask-option.is-selected .porygon-ask-option-index {
@@ -1047,6 +1063,46 @@
 	text-transform: uppercase;
 }
 
+.porygon-ask-header-actions {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: var(--size-4-3);
+}
+
+/* Double the class so this beats Obsidian's `button:not(.clickable-icon)`
+   background rule. The close button only gets a background on hover. */
+.porygon-ask-close.porygon-ask-close {
+	display: inline-flex;
+	width: 24px;
+	height: 24px;
+	min-height: 0;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+}
+
+.porygon-ask-close.porygon-ask-close:focus,
+.porygon-ask-close.porygon-ask-close:focus-visible,
+.porygon-ask-close.porygon-ask-close:active {
+	background: transparent;
+}
+
+.porygon-ask-close.porygon-ask-close:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.porygon-ask-close .svg-icon {
+	width: 16px;
+	height: 16px;
+}
+
 .porygon-ask-progress {
 	display: flex;
 	flex: 0 0 auto;
@@ -1090,11 +1146,6 @@
 	gap: var(--size-4-2);
 	overflow-y: auto;
 	padding: 0 var(--size-2-2);
-}
-
-.porygon-ask-hint {
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
 }
 
 .porygon-ask-option-indicator,
@@ -1175,9 +1226,27 @@
 	background: var(--background-modifier-hover);
 }
 
+.porygon-ask-free-text {
+	padding: var(--size-2-2);
+	border: 0;
+	background: var(--background-modifier-form-field);
+	cursor: text;
+}
+
+.porygon-ask-free-text:hover,
+.porygon-ask-free-text:focus-within {
+	background: var(--background-modifier-form-field-highlighted);
+}
+
 .porygon-ask-custom-indicator {
 	margin-top: 5px;
 	cursor: pointer;
+}
+
+.porygon-ask-custom-indicator:focus,
+.porygon-ask-custom-indicator:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 .porygon-ask-custom-input.porygon-ask-custom-input {
@@ -1192,9 +1261,16 @@
 	outline: none;
 	box-shadow: none;
 	background: transparent;
+	color: var(--text-normal);
+	cursor: text;
 	font-family: inherit;
 	line-height: 1.4;
 	text-align: left;
+}
+
+.porygon-ask-custom-input.porygon-ask-custom-input::placeholder {
+	color: var(--text-muted);
+	opacity: 1;
 }
 
 .porygon-ask-custom-input.porygon-ask-custom-input:hover,
@@ -1228,12 +1304,29 @@
 }
 
 .porygon-ask-footer-button {
+	display: inline-flex;
 	min-height: 30px;
+	align-items: center;
+	justify-content: center;
 	padding: 0 var(--size-4-2);
 	border: 0;
 	box-shadow: none;
 	background: transparent;
 	color: var(--text-muted);
+}
+
+.porygon-ask-footer-button[hidden] {
+	display: none;
+}
+
+.porygon-ask-icon-button {
+	width: 30px;
+	padding: 0;
+}
+
+.porygon-ask-footer-button .svg-icon {
+	width: 16px;
+	height: 16px;
 }
 
 .porygon-ask-footer-button:hover {
