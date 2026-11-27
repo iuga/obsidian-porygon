@@ -2,11 +2,9 @@ import { interrupt, isGraphBubbleUp } from "@langchain/langgraph";
 import { App, normalizePath, TFile, TFolder } from "obsidian";
 import { z } from "zod";
 import { RagIndexProgress } from "../../rag";
+import { APPROVE_LABEL, DENY_LABEL, type AskUserApprovalPayload } from "./ask-user-types";
 
-export interface AskUserInterruptPayload {
-	question: string;
-	options: string[];
-}
+export type { AskUserInterruptPayload } from "./ask-user-types";
 
 export type ApprovalDecision =
 	| { kind: "approve" }
@@ -33,11 +31,10 @@ export interface BacklinkReference {
 	line: number;
 }
 
-export const APPROVE_LABEL = "Approve";
-export const DENY_LABEL = "Deny";
-// Reserved labels above must stay in sync with the popover UI in
-// view.ts (Approve/Deny buttons). Any other reply is treated as
-// `deny_with_feedback` so the agent gets the user's free-form rationale.
+export { APPROVE_LABEL, DENY_LABEL };
+// Reserved labels above must stay in sync with the approval popover UI. Any
+// other reply is treated as `deny_with_feedback` so the agent gets the user's
+// free-form rationale.
 
 export const DEFAULT_VIEW_LIMIT = 2000;
 export const SEMANTIC_SNIPPET_MAX_CHARS = 320;
@@ -50,11 +47,12 @@ export function requestApproval(question: string, getYolo: () => boolean): Appro
 	if (getYolo()) {
 		return { kind: "approve" };
 	}
-	const payload: AskUserInterruptPayload = {
+	const payload: AskUserApprovalPayload = {
+		kind: "approval",
 		question,
 		options: [APPROVE_LABEL, DENY_LABEL],
 	};
-	const reply = interrupt<AskUserInterruptPayload, unknown>(payload);
+	const reply = interrupt<AskUserApprovalPayload, string>(payload);
 	const text = typeof reply === "string" ? reply.trim() : "";
 	if (text === APPROVE_LABEL) {
 		return { kind: "approve" };

@@ -15,7 +15,16 @@ import { createSaveMemoryTool } from "./save-memory";
 import { createSearchTool } from "./search";
 import { createViewTool } from "./view";
 
-export type { AskUserInterruptPayload } from "./shared";
+export { APPROVE_LABEL, DENY_LABEL } from "./ask-user-types";
+export type {
+	AskUserApprovalPayload,
+	AskUserInterruptPayload,
+	AskUserOption,
+	AskUserQuestion,
+	AskUserQuestionsPayload,
+	AskUserReply,
+	AskUserResumeValue,
+} from "./ask-user-types";
 
 export function createAgentTools(
 	app: App,

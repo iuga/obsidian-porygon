@@ -1,7 +1,9 @@
 import { AIMessageChunk, BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import { ToolCallChunk } from "@langchain/core/messages/tool";
-import { AskUserInterruptPayload } from "./tools";
+import { normalizeAskUserPayload, type AskUserInterruptPayload } from "./tools/ask-user-types";
 import type { AgentChatMessage, AgentToolCallIntent } from "./agent";
+
+export { normalizeAskUserPayload } from "./tools/ask-user-types";
 
 const MODEL_NODE_NAME = "model_request";
 
@@ -233,20 +235,4 @@ export function getPendingAskUserPayloads(state: AgentState): PendingAskUser[] {
 		}
 	}
 	return pending;
-}
-
-export function normalizeAskUserPayload(value: unknown): AskUserInterruptPayload | null {
-	if (!isRecord(value)) {
-		return null;
-	}
-	const { question, options } = value as { question?: unknown; options?: unknown };
-	if (typeof question !== "string" || !Array.isArray(options)) {
-		return null;
-	}
-	const stringOptions = options.filter((option): option is string => typeof option === "string");
-	if (stringOptions.length < 2) {
-		return null;
-	}
-	// Defensive cap: ignore extra options beyond the first 4 instead of failing.
-	return { question, options: stringOptions.slice(0, 4) };
 }

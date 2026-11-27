@@ -11,10 +11,19 @@ import { SkillsService } from "./skills";
 import { AgentLike, AgentTokenUsage, consumeAgentStream, createStreamAccumulator, getPendingAskUserPayloads, readUsageFromState, toLangChainMessage, ToolIntentTracker } from "./streaming";
 import { createToolConcurrencyMiddleware } from "./tool-concurrency";
 import { clearToolExecutionObserver, setToolExecutionObserver, type ToolExecutionEvent, type ToolExecutionTimingState } from "./tool-events";
-import { AskUserInterruptPayload, createAgentTools } from "./tools";
+import { createAgentTools } from "./tools";
+import type { AskUserInterruptPayload, AskUserResumeValue } from "./tools";
 
 export { generateSessionTitle, type SessionTitleAgentOptions } from "./model";
-export type { AskUserInterruptPayload } from "./tools";
+export type {
+	AskUserApprovalPayload,
+	AskUserInterruptPayload,
+	AskUserOption,
+	AskUserQuestion,
+	AskUserQuestionsPayload,
+	AskUserReply,
+	AskUserResumeValue,
+} from "./tools";
 export type { AgentTokenUsage } from "./streaming";
 
 export type AgentChatRole = "user" | "porygon" | "file";
@@ -78,7 +87,7 @@ export interface LocalAgentStreamHandlers {
 	onToolIntent?: (toolIntent: AgentToolCallIntent) => void;
 	onToolExecution?: (event: ToolExecutionEvent) => void;
 	onUsage?: (usage: AgentTokenUsage) => void;
-	onAskUser?: (payload: AskUserInterruptPayload) => Promise<string> | string;
+	onAskUser?: (payload: AskUserInterruptPayload) => Promise<AskUserResumeValue> | AskUserResumeValue;
 }
 
 const MAX_INTERRUPT_RESUME_CYCLES = 16;
@@ -169,7 +178,7 @@ export async function streamLocalAgent(options: LocalAgentOptions, handlers: Loc
 			// Resume each pending interrupt sequentially with the user's reply.
 			// LangGraph stores the resume map keyed by interrupt id; we collect
 			// them all so multiple interrupts in one turn don't get dropped.
-			const resumeMap: Record<string, string> = {};
+			const resumeMap: Record<string, AskUserResumeValue> = {};
 			for (const { id, payload } of askPayloads) {
 				resumeMap[id] = await handlers.onAskUser(payload);
 			}
